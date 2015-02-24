@@ -2,6 +2,19 @@ cmake_minimum_required(VERSION 2.8.7)
 
 project(depthsense_camera_ros)
 
+
+###############################################################################
+## Note by Myzhar                                                            ##
+## ===============                                                           ##
+##                                                                           ##
+## If you get an exception error of the type:                                ##
+## "ERROR: no enumerator found, some dll files are missing"                  ##
+##                                                                           ##
+## you must run this command in a terminal:                                  ##
+##                                                                           ##
+## sudo ln -s /lib/x86_64-linux-gnu/libudev.so.1.3.5 /usr/lib/libudev.so.0   ##
+###############################################################################
+
 set(ROS_BUILD_TYPE Debug)
 set(CMAKE_BUILD_TYPE Debug)
 
@@ -48,7 +61,7 @@ add_executable(
   ${depthsense_SRC}
 )
 
-FIND_LIBRARY(DEPTHSENSE_LIBRARY DepthSense /opt/softkinetic/DepthSenseSDK/lib/)
+FIND_LIBRARY(DEPTHSENSE_LIBRARY DepthSense DepthSensePlugins turbojpeg /opt/softkinetic/DepthSenseSDK/lib/)
 
 target_link_libraries(
   depthsense_camera_node

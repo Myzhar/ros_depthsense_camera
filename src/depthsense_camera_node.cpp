@@ -13,6 +13,8 @@ int main(int argc, char** argv)
 
   DepthSenseDriver cameraDriver;
 
+  cameraDriver.run();
+
   ros::spin();
 
   return(EXIT_SUCCESS);

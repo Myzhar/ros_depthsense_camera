@@ -49,9 +49,6 @@ private:
     std::list<DepthSense::Device> _devices;
     std::list<NodeInfo*> _nodeInfos;
 
-    //DepthSense::ColorNode _color; ///< DepthSense color node
-    //DepthSense::DepthNode _depth; ///< DepthSense depth node
-
     bool _initialized;
     bool _streaming;
     bool _error;

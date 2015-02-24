@@ -49,6 +49,11 @@ void DepthSenseDriver::init()
 
     std::vector<DepthSense::Device> devices = _context.getDevices();
 
+    if( devices.size()==0 )
+    {
+        ROS_INFO_STREAM( "Waiting for a SoftKinetic DepthSense device to be connected... ");
+    }
+
     for (unsigned int i = 0; i < devices.size(); i++)
     {
         onDeviceAdded(_context, devices[i]);
@@ -59,6 +64,7 @@ void DepthSenseDriver::init()
             onNodeAdded(devices[i], nodes[j]);
         }
     }
+
     _initialized = true;
 }
 
