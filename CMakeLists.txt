@@ -23,6 +23,7 @@ catkin_package(
 set(depthsense_INC_DIRS
     src/
     src/driver/include/
+    /opt/softkinetic/DepthSenseSDK/include
 )
 
 # Specify locations of header files.
@@ -43,13 +44,13 @@ set(depthsense_SRC
 #########################################################
 # EXECUTABLE
 add_executable(
-	depthsense_camera_node 
+  depthsense_camera_node
   ${depthsense_SRC}
 )
 
 target_link_libraries(
-	depthsense_camera_node
-  ${catkin_LIBRARIES} pthread
+  depthsense_camera_node
+  ${catkin_LIBRARIES} turbojpeg DepthSense pthread DepthSensePlugins
 )
 #########################################################
 
