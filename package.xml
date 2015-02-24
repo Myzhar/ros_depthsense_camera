@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>depthdense_camera_ros</name>
+  <name>depthsense_camera_ros</name>
   <version>0.1.0</version>
   <description>ROS Package to connect to SoftKinetic DepthSense cameras</description>
 

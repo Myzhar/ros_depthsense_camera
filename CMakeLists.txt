@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.7)
 
-project(depthdense_camera_ros)
+project(depthsense_camera_ros)
 
 set(ROS_BUILD_TYPE Debug)
 set(CMAKE_BUILD_TYPE Debug)
@@ -48,9 +48,11 @@ add_executable(
   ${depthsense_SRC}
 )
 
+FIND_LIBRARY(DEPTHSENSE_LIBRARY DepthSense /opt/softkinetic/DepthSenseSDK/lib/)
+
 target_link_libraries(
   depthsense_camera_node
-  ${catkin_LIBRARIES} turbojpeg DepthSense pthread DepthSensePlugins
+  ${catkin_LIBRARIES} ${DEPTHSENSE_LIBRARY}
 )
 #########################################################
 

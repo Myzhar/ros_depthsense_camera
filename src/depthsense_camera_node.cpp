@@ -11,6 +11,8 @@ int main(int argc, char** argv)
   ROS_INFO_STREAM("    SoftKinetic DepthSense Node    \r");
   ROS_INFO_STREAM("-----------------------------------\r");
 
+  DepthSenseDriver cameraDriver;
+
   ros::spin();
 
   return(EXIT_SUCCESS);
