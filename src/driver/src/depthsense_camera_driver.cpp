@@ -1,58 +1,60 @@
 #include "depthsense_camera_driver.h"
-#include <signal.h>
 
-// >>>>> Quit MACRO
-#define CONTEXT_QUIT(context)                           \
-    do                                                      \
-{                                                       \
-    try {                                               \
-    context.quit();                                 \
-    }                                                   \
-    catch (DepthSense::InvalidOperationException&)      \
-{                                                   \
-    }                                                   \
-    } while (0)
-// <<<<< Quit MACRO
+//extern sig_atomic_t volatile g_request_shutdown;
 
-sig_atomic_t volatile g_request_shutdown = 0;
-
-void mySigintHandler(int sig)
-{
-    g_request_shutdown = 1;
-}
+bool DepthSenseDriver::_stopping = false;
 
 DepthSenseDriver::DepthSenseDriver()
     : _initialized(false)
     , _streaming(false)
     , _error(false)
 {
-
+    struct sigaction sigAct;
+    memset(&sigAct, 0, sizeof(sigAct));
+    sigAct.sa_handler = DepthSenseDriver::sighandler;
+    sigaction(SIGINT, &sigAct, 0);
 }
-
 
 DepthSenseDriver::~DepthSenseDriver()
 {
     release();
 }
 
-void DepthSenseDriver::init()
+void DepthSenseDriver::contextQuit()
+{
+    do
+    {
+        try
+        {
+            _context.quit();
+        }
+        catch (DepthSense::InvalidOperationException& e)
+        {
+            ROS_ERROR_STREAM( "Error quitting context: " << e.what() );
+        }
+    } while (0);
+}
+
+bool DepthSenseDriver::init()
 {
     if (_initialized)
     {
-        return;
+        return true;
     }
 
     _context = DepthSense::Context::createStandalone();
-
-    _context.deviceAddedEvent().connect(this, &DepthSenseDriver::onDeviceAdded);
-    _context.deviceRemovedEvent().connect(this, &DepthSenseDriver::onDeviceRemoved);
 
     std::vector<DepthSense::Device> devices = _context.getDevices();
 
     if( devices.size()==0 )
     {
-        ROS_INFO_STREAM( "Waiting for a SoftKinetic DepthSense device to be connected... ");
+        ROS_ERROR_STREAM( "No connected device found!");
+        _error = true;
+        return false;
     }
+
+    _context.deviceAddedEvent().connect(this, &DepthSenseDriver::onDeviceAdded);
+    _context.deviceRemovedEvent().connect(this, &DepthSenseDriver::onDeviceRemoved);
 
     for (unsigned int i = 0; i < devices.size(); i++)
     {
@@ -66,11 +68,60 @@ void DepthSenseDriver::init()
     }
 
     _initialized = true;
+
+    return true;
 }
 
 void DepthSenseDriver::release()
 {
+    if (!_initialized)
+    {
+        return;
+    }
 
+    ROS_INFO_STREAM( "Stopping device...");
+
+    std::vector<DepthSense::Node> registeredNodes = _context.getRegisteredNodes();
+
+    for (unsigned int i = 0; i < registeredNodes.size(); i++)
+    {
+        if (registeredNodes[i].is<DepthSense::DepthNode>())
+        {
+            DepthSense::DepthNode n = registeredNodes[i].as<DepthSense::DepthNode>();
+            n.newSampleReceivedEvent().disconnect
+                    (this, &DepthSenseDriver::onNewDepthNodeSampleReceived);
+        }
+    }
+
+    std::list<DepthSense::Device>::iterator it;
+
+    if (_streaming)
+    {
+        _context.stopNodes();
+    }
+
+    for (it = _devices.begin(); it != _devices.end(); it++)
+    {
+        DepthSense::Device device = *it;
+        device.nodeRemovedEvent().disconnect(this, &DepthSenseDriver::onNodeRemoved);
+        device.nodeAddedEvent().disconnect(this, &DepthSenseDriver::onNodeAdded);
+    }
+
+    _context.deviceRemovedEvent().disconnect(this, &DepthSenseDriver::onDeviceRemoved);
+    _context.deviceAddedEvent().disconnect(this, &DepthSenseDriver::onDeviceAdded);
+
+    //CONTEXT_QUIT(_context);
+    contextQuit();
+
+    while (!_nodeInfos.empty())
+    {
+        NodeInfo* info = _nodeInfos.front();
+        _nodeInfos.pop_front();
+        delete info;
+    }
+
+    _devices.clear();
+    _initialized = false;
 }
 
 void DepthSenseDriver::run()
@@ -82,8 +133,15 @@ void DepthSenseDriver::run()
         _context.run();
     }
 
+    ROS_INFO_STREAM( "DepthSense context stopped... ");
+
     release();
+
+    ROS_INFO_STREAM( "Stopping node... ");
+
     ros::shutdown();
+
+    ROS_INFO_STREAM( "... done.");
 }
 
 void DepthSenseDriver::onDeviceRemoved(DepthSense::Context context, DepthSense::Device device)
@@ -168,12 +226,18 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
     int32_t height = 0;
     float range = 0.0f;
 
+    if( node.is<DepthSense::AudioNode>() )
+    {
+        ROS_INFO_STREAM("--- Audio node not yet supported -------");
+        return;
+    }
+
     ROS_INFO_STREAM("--- Node added ------------------------------------");
 
-    ROS_INFO( " Node type: %s"
-              " VID:       %04x"
-              " PID:       %04x"
-              " Revision:  %04d"
+    ROS_INFO( " Node type: %s \n"
+              " VID:       %04x \n"
+              " PID:       %04x \n"
+              " Revision:  %04d \n"
               , node.getType().name().c_str()
               , node.getVID()
               , node.getPID()
@@ -190,7 +254,8 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
 
         for (unsigned int i = 0; i < configurations.size(); i++)
         {
-            ROS_INFO("    %s - %d fps - %s - saturation %s", DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
+            ROS_INFO("    %s - %d fps - %s - saturation %s",
+                     DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
                      configurations[i].framerate,
                      DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
                      configurations[i].saturation ? "enabled" : "disabled");
@@ -215,7 +280,8 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
                 ROS_ERROR_STREAM("Error : Could not take control");
 
                 _error = true;
-                CONTEXT_QUIT(_context);
+                //CONTEXT_QUIT(_context);
+                contextQuit();
 
                 return;
             }
@@ -237,7 +303,8 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
                 ROS_INFO(" - Saturation: %s", configuration.saturation ? "enabled" : "disabled");
                 _error = true;
 
-                CONTEXT_QUIT(_context);
+                //CONTEXT_QUIT(_context);
+                contextQuit();
                 return;
             }
         }
@@ -284,9 +351,8 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
 
             catch (DepthSense::Exception&) {
                 ROS_INFO("---------------------------------------------------");
-                ROS_INFO("Error : Could not take control");
-                _error = true;
-                CONTEXT_QUIT(_context);
+                //CONTEXT_QUIT(_context);
+                contextQuit();
                 return;
             }
 
@@ -300,7 +366,8 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
                 ROS_INFO(" - Frame format: %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str());
                 ROS_INFO(" - Frame rate: %d fps", configuration.framerate);
                 _error = true;
-                CONTEXT_QUIT(_context);
+                //CONTEXT_QUIT(_context);
+                contextQuit();
                 return;
             }
         }
@@ -317,11 +384,13 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
     }
     ROS_INFO("---------------------------------------------------");
 
-    if (node.is<DepthSense::UnsupportedNode>()) {
+    if (node.is<DepthSense::UnsupportedNode>())
+    {
         return;
     }
 
-    try {
+    try
+    {
         _context.registerNode(node);
     }
 
@@ -372,10 +441,17 @@ void DepthSenseDriver::onNodeRemoved(DepthSense::Device device, DepthSense::Node
     }
 }
 
-void DepthSenseDriver::onNewColorNodeSampleReceived
-(DepthSense::ColorNode node, DepthSense::ColorNode::NewSampleReceivedData data)
-
+void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
+                                                     DepthSense::ColorNode::NewSampleReceivedData data)
 {
+    if (_stopping)
+    {
+        ROS_INFO_STREAM( "Color sample received while node is closing..." );
+        //CONTEXT_QUIT(_context);
+        contextQuit();
+        return;
+    }
+
     const uint8_t* rawimg;
     const uint8_t* compressedimg;
 
@@ -394,6 +470,7 @@ void DepthSenseDriver::onNewColorNodeSampleReceived
     ++info->totalSampleCount;
     ++info->sampleCount;
 
+    ROS_INFO_STREAM( "Received color frame #" << info->sampleCount );
     //    std_msgs::Header msgheader;
     //    msgheader.stamp = ros::Time::now();
     //    msgheader.seq = info->totalSampleCount;
@@ -454,16 +531,21 @@ void DepthSenseDriver::onNewColorNodeSampleReceived
     //        projected_target.publish(projected);
     //    }
 
-    if (g_request_shutdown) {
-        CONTEXT_QUIT(_context);
-    }
+
 
 }
 
-void DepthSenseDriver::onNewDepthNodeSampleReceived
-(DepthSense::DepthNode node, DepthSense::DepthNode::NewSampleReceivedData data)
-
+void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
+                                                     DepthSense::DepthNode::NewSampleReceivedData data)
 {
+    if (_stopping)
+    {
+        ROS_INFO_STREAM( "Depth sample received while node is closing..." );
+        //CONTEXT_QUIT(_context);
+        contextQuit();
+        return;
+    }
+
     NodeInfo* info = findInfo(node);
 
     if (info == NULL) {
@@ -481,6 +563,8 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived
 
     ++info->totalSampleCount;
     ++info->sampleCount;
+
+    ROS_INFO_STREAM( "Received depth frame #" << info->sampleCount );
 
     ////prep a consistent header
     //    std_msgs::Header msgheader;
@@ -595,10 +679,6 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived
     //    rawpcl_out.header = msgheader;
     //    raw_cloud.publish(rawpcl_out);
     //*/
-
-    if (g_request_shutdown) {
-        CONTEXT_QUIT(_context);
-    }
 
 }
 

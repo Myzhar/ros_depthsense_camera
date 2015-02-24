@@ -1,7 +1,7 @@
 #include <DepthSense.hxx>
 
 #include <ros/ros.h>
-
+#include <csignal>
 #include <list>
 
 using namespace std;
@@ -24,12 +24,10 @@ public:
     DepthSenseDriver();
     ~DepthSenseDriver();
 
-    void init();
+    bool init();
     void release();
 
     void run();
-
-    void mySigintHandler(int sig);
 
 private:
     void onDeviceAdded(DepthSense::Context context, DepthSense::Device device);
@@ -43,7 +41,20 @@ private:
     void onNewDepthNodeSampleReceived(DepthSense::DepthNode node, DepthSense::DepthNode::NewSampleReceivedData data);
     void onNewColorNodeSampleReceived(DepthSense::ColorNode node, DepthSense::ColorNode::NewSampleReceivedData data);
 
+    void contextQuit();
+
+    // >>>>> Ctrl+C handler
+    /*! Ctrl+C handler
+     */
+    static void sighandler(int signo)
+    {
+        DepthSenseDriver::_stopping = (signo == SIGINT);
+    }
+    // <<<<< Ctrl+C handler
+
 private:
+    ros::NodeHandle _nh;
+
     DepthSense::Context _context; ///< DepthSense context
 
     std::list<DepthSense::Device> _devices;
@@ -52,5 +63,7 @@ private:
     bool _initialized;
     bool _streaming;
     bool _error;
+
+    static bool _stopping;
 };
 
