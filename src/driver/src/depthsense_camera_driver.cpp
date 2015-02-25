@@ -45,13 +45,27 @@ bool DepthSenseDriver::init()
     _context = DepthSense::Context::createStandalone();
 
     std::vector<DepthSense::Device> devices = _context.getDevices();
+    int noDeviceCount = 0;
 
-    if( devices.size()==0 )
+    do
     {
-        ROS_ERROR_STREAM( "No connected device found!");
-        _error = true;
-        return false;
-    }
+        devices = _context.getDevices();
+
+        if( devices.size() == 0 )
+        {
+            if( noDeviceCount>60 || _stopping )
+            {
+                ROS_WARN_STREAM( "Aborting node... ");
+                _error = true;
+                return false;
+            }
+
+            noDeviceCount++;
+            ROS_WARN_STREAM( "#" << noDeviceCount << " No connected device found... ");
+
+            ros::Duration(1.0).sleep(); // sleep for 1 seconds
+        }
+    }while( devices.size()==0 );
 
     _context.deviceAddedEvent().connect(this, &DepthSenseDriver::onDeviceAdded);
     _context.deviceRemovedEvent().connect(this, &DepthSenseDriver::onDeviceRemoved);
