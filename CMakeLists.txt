@@ -12,7 +12,13 @@ project(depthsense_camera_ros)
 ##                                                                           ##
 ## you must run this command in a terminal:                                  ##
 ##                                                                           ##
-## sudo ln -s /lib/x86_64-linux-gnu/libudev.so.1.3.5 /usr/lib/libudev.so.0   ##
+## $sudo ln -s /lib/x86_64-linux-gnu/libudev.so.1.3.5 /usr/lib/libudev.so.0  ##
+##                                                                           ##
+## To be able to access the video streams you need to add your user to the   ##
+## "video" usergroup entering the following commands:                        ##
+##                                                                           ##
+## $sudo adduser ubuntu video [replace "ubuntu" with your current username]  ##
+## $sudo chmod g+rw /dev/video*                                              ##
 ###############################################################################
 
 set(ROS_BUILD_TYPE Debug)
