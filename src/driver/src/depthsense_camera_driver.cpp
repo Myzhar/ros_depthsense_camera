@@ -1,6 +1,13 @@
 #include "depthsense_camera_driver.h"
+#include <std_msgs/Header.h>
+#include <sensor_msgs/PointCloud2.h>
 
-//extern sig_atomic_t volatile g_request_shutdown;
+#include <tf/tf.h>
+#include <tf/transform_broadcaster.h>
+
+#ifndef DEG2RAD
+#define DEG2RAD 0.017444444
+#endif
 
 bool DepthSenseDriver::_stopping = false;
 
@@ -13,6 +20,9 @@ DepthSenseDriver::DepthSenseDriver()
     memset(&sigAct, 0, sizeof(sigAct));
     sigAct.sa_handler = DepthSenseDriver::sighandler;
     sigaction(SIGINT, &sigAct, 0);
+
+    _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("int_vertex_data", 1, false);
+    _publish_tf = true;
 }
 
 DepthSenseDriver::~DepthSenseDriver()
@@ -277,8 +287,9 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
 
         n.setEnableDepthMap(false);
         n.setEnableVerticesFloatingPoint(true);
-        n.setEnableUvMap(true);
-        n.setEnableAccelerometer(true);
+        n.setEnableVertices(false);
+        n.setEnableUvMap(false);
+        n.setEnableAccelerometer(false);
         bool doSetConfiguration = true;
 
         if (doSetConfiguration)
@@ -566,11 +577,6 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
         return;
     }
 
-    const DepthSense::FPVertex* floatVertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
-    const DepthSense::UV* uv = (const DepthSense::UV*) data.uvMap;
-    const DepthSense::DepthNode::Acceleration acceleration = data.acceleration;
-
-
     if (info->totalSampleCount == 0) {
         info->sampleCount = 0;
     }
@@ -580,11 +586,71 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
 
     ROS_INFO_STREAM( "Received depth frame #" << info->sampleCount );
 
-    ////prep a consistent header
-    //    std_msgs::Header msgheader;
-    //    msgheader.stamp = ros::Time::now();
-    //    msgheader.seq = info->totalSampleCount;
-    //    msgheader.frame_id = "camera_gimbal_frame";
+    //const DepthSense::FPVertex* floatVertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
+    //const DepthSense::UV* uv = (const DepthSense::UV*) data.uvMap;
+    //const DepthSense::DepthNode::Acceleration acceleration = data.acceleration;
+
+    // >>>>> float Point Clouds (data in m)
+
+    const DepthSense::FPVertex* vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
+
+    //prep a consistent header
+    std_msgs::Header msgheader;
+    msgheader.stamp = ros::Time::now();
+    msgheader.seq = info->totalSampleCount;
+    msgheader.frame_id = "depth_frame";
+
+    sensor_msgs::PointCloud2 msg;
+    msg.header = msgheader;
+
+    int pointsCount = info->width * info->height;
+
+    msg.fields.resize(3);
+    msg.fields[0].name = "x";
+    msg.fields[0].offset = 0;
+    msg.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+    msg.fields[0].count = pointsCount;
+    msg.fields[1].name = "y";
+    msg.fields[1].offset = sizeof(float);
+    msg.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+    msg.fields[1].count = pointsCount;
+    msg.fields[2].name = "z";
+    msg.fields[2].offset = 2*sizeof(float);
+    msg.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+    msg.fields[2].count = pointsCount;
+
+    msg.width = info->width;
+    msg.height = info->height;
+    msg.is_dense = true;
+    msg.is_bigendian = false;
+    msg.point_step = sizeof(float) * 3;
+    msg.row_step = msg.point_step * msg.width;
+
+    int cloudSize = pointsCount * msg.point_step;
+    msg.data.resize( cloudSize );
+
+    memcpy( (uint8_t*)(&msg.data[0]), (uint8_t*)(&vertex[0]), cloudSize );
+    /*for( int i=0; i<pointsCount; i++)
+    {
+        msg.data[i*3+0] = vertex[i].x;
+        msg.data[i*3+1] = vertex[i].y;
+        msg.data[i*3+2] = vertex[i].z;
+    }*/
+
+    _vertex_pub.publish( msg );
+
+    if(_publish_tf)
+    {
+        static tf::TransformBroadcaster br;
+        tf::Transform transform;
+        transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
+        tf::Quaternion q;
+        q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 90.0*DEG2RAD);
+        transform.setRotation(q);
+        br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );
+    }
+    // <<<<< float Point Clouds (data in m)
+
 
     ////broadcast acclerometer data
     //    geometry_msgs::PointStamped accel;

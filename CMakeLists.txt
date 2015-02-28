@@ -29,6 +29,7 @@ set(CMAKE_BUILD_TYPE Debug)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
+  tf
 )
 
 catkin_package(

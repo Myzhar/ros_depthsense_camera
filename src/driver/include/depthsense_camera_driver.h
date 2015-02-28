@@ -54,6 +54,7 @@ private:
 
 private:
     ros::NodeHandle _nh;
+    ros::Publisher _vertex_pub;
 
     DepthSense::Context _context; ///< DepthSense context
 
@@ -65,5 +66,7 @@ private:
     bool _error;
 
     static bool _stopping;
+
+    bool _publish_tf;
 };
 
