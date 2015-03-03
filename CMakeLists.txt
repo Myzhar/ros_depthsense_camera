@@ -12,19 +12,57 @@ project(depthsense_camera_ros)
 ## you must run this command in a terminal:                                  ##
 ##                                                                           ##
 ## 64 bit systems:                                                           ##
-## $sudo ln -s /lib/x86_64-linux-gnu/libudev.so.1.3.5 /usr/lib/libudev.so.0  ##
+## $ sudo ln -s /lib/x86_64-linux-gnu/libudev.so.1.3.5 /usr/lib/libudev.so.0 ##
 ## 32 bit systems:                                                           ##
-## $sudo ln –s /lib/i386-linux-gnu/libudev.so.1 /usr/lib/libudev.so.0        ##
+## $ sudo ln –s /lib/i386-linux-gnu/libudev.so.1 /usr/lib/libudev.so.0       ##
 ##                                                                           ##
 ## To be able to access the video streams you need to add your user to the   ##
 ## "video" usergroup entering the following commands:                        ##
 ##                                                                           ##
-## $sudo adduser ubuntu video [replace "ubuntu" with your current username]  ##
-## $sudo chmod g+rw /dev/video*                                              ##
+## $ sudo adduser ubuntu video [replace "ubuntu" with your current username] ##
+## $ sudo chmod g+rw /dev/video*                                             ##
+##                                                                           ##
+## REMEMBER TO DELETE "CMakeCache.txt" if you want to change compilation     ##
+## options                                                                   ##
 ###############################################################################
 
-set(ROS_BUILD_TYPE Debug)
-set(CMAKE_BUILD_TYPE Debug)
+###############################################################################
+## Options
+option( DEBUG_ACTIVE "Enable Debug build" ON )
+
+IF(DEBUG_ACTIVE)
+    MESSAGE( "Debug compilation active" )
+    set(ROS_BUILD_TYPE Debug)
+    set(CMAKE_BUILD_TYPE Debug)
+ELSE()
+    MESSAGE( "Release compilation active" )
+    set(ROS_BUILD_TYPE Release)
+    set(CMAKE_BUILD_TYPE Release)
+ENDIF()
+###############################################################################
+
+#########################################################
+## CUDA
+find_package(CUDA)
+if(CUDA_FOUND)
+    try_run(RUN_RESULT_VAR COMPILE_RESULT_VAR
+        ${CMAKE_BINARY_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/cuda_test/has_cuda_gpu.c
+        CMAKE_FLAGS
+            -DINCLUDE_DIRECTORIES:STRING=${CUDA_TOOLKIT_INCLUDE}
+            -DLINK_LIBRARIES:STRING=${CUDA_CUDART_LIBRARY}
+        COMPILE_OUTPUT_VARIABLE COMPILE_OUTPUT_VAR
+        RUN_OUTPUT_VARIABLE RUN_OUTPUT_VAR)
+    message("${RUN_OUTPUT_VAR}") # Display number of GPUs found
+    # COMPILE_RESULT_VAR is TRUE when compile succeeds
+    # RUN_RESULT_VAR is zero when a GPU is found
+    if(COMPILE_RESULT_VAR AND NOT RUN_RESULT_VAR)
+        set(CUDA_HAVE_GPU TRUE CACHE BOOL "Whether CUDA-capable GPU is present")
+    else()
+        set(CUDA_HAVE_GPU FALSE CACHE BOOL "Whether CUDA-capable GPU is present")
+    endif()
+endif(CUDA_FOUND)
+#########################################################
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -62,6 +100,8 @@ set(depthsense_SRC
     src/driver/src/depthsense_camera_driver.cpp
 )
 #########################################################
+
+
 
 #########################################################
 # EXECUTABLE

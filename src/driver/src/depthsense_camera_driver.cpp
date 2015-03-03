@@ -21,7 +21,7 @@ DepthSenseDriver::DepthSenseDriver()
     sigAct.sa_handler = DepthSenseDriver::sighandler;
     sigaction(SIGINT, &sigAct, 0);
 
-    _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("int_vertex_data", 1, false);
+    _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_data", 1, false);
     _publish_tf = true;
 }
 
@@ -239,12 +239,208 @@ void DepthSenseDriver::onDeviceAdded(DepthSense::Context context, DepthSense::De
     _devices.push_back(device);
 }
 
+bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node node, int32_t& width, int32_t& height , float& range)
+{
+
+    ROS_INFO_STREAM("--- New Depth Node  ------------------------------------");
+
+    ROS_INFO( " Node type: %s - VID: %04x - PID: %04x - Revision: %04d"
+              , node.getType().name().c_str()
+              , node.getVID()
+              , node.getPID()
+              , node.getRevision() );
+
+    DepthSense::DepthNode depthNode = node.as<DepthSense::DepthNode>();
+
+    DepthSense::DepthNode::Configuration configuration = depthNode.getConfiguration();
+
+    ROS_INFO_STREAM(" Available configurations:");
+    std::vector<DepthSense::DepthNode::Configuration> configurations = depthNode.getConfigurations();
+
+    for(unsigned int i = 0; i < configurations.size(); i++)
+    {
+        ROS_INFO("    %s - %d fps - %s - saturation %s",
+                 DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
+                 configurations[i].framerate,
+                 DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
+                 configurations[i].saturation ? "enabled" : "disabled");
+    }
+
+    // >>>>> Node data enabling
+    depthNode.setEnableAccelerometer( false ); // TODO handle data
+    depthNode.setEnableConfidenceMap( false ); // TODO handle data
+    depthNode.setEnableDepthMap( false ); // TODO handle data
+    depthNode.setEnableDepthMapFloatingPoint( false ); // TODO handle data
+    depthNode.setEnablePhaseMap( false ); // TODO handle data
+    depthNode.setEnableUvMap( false ); // TODO handle data
+    depthNode.setEnableVertices( false ); // TODO handle data
+    depthNode.setEnableVerticesFloatingPoint( true ); // TODO handle data
+    // <<<<< Node data enabling
+
+    bool doSetConfiguration = true;
+
+    if (doSetConfiguration)
+    {
+        try
+        {
+            _context.requestControl(depthNode, 0);
+        }
+
+        catch (DepthSense::Exception&)
+        {
+            ROS_INFO_STREAM("---------------------------------------------------");
+            ROS_ERROR_STREAM("Error : Could not take control");
+
+            _error = true;
+            //CONTEXT_QUIT(_context);
+            contextQuit();
+
+            return false;
+        }
+
+        // >>>>> Parameters
+        depthNode.setConfidenceThreshold(60); // TODO create param
+        depthNode.setEnableDenoising( true ); // TODO create param
+        configuration.framerate = 60; // TODO create param
+        // <<<<< Parameters
+
+        try
+        {
+            depthNode.setConfiguration(configuration);
+            _context.releaseControl(depthNode);
+        }
+        catch (std::exception&)
+        {
+            ROS_INFO_STREAM("---------------------------------------------------");
+            ROS_INFO("Incorrect configuration :");
+            ROS_INFO(" - Frame format: %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str());
+            ROS_INFO(" - Frame rate: %d fps", configuration.framerate);
+            ROS_INFO(" - Mode: %s", DepthSense::DepthNode::CameraMode_toString(configuration.mode).c_str());
+            ROS_INFO(" - Saturation: %s", configuration.saturation ? "enabled" : "disabled");
+            _error = true;
+
+            //CONTEXT_QUIT(_context);
+            contextQuit();
+            return false;
+        }
+    }
+
+    ROS_INFO(" Depth node streaming enabled - current configuration:");
+    ROS_INFO("    %s - %d fps - %s - saturation %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str(),
+             configuration.framerate,
+             DepthSense::DepthNode::CameraMode_toString(configuration.mode).c_str(),
+             configuration.saturation ? "enabled" : "disabled");
+
+    depthNode.newSampleReceivedEvent().connect (this, &DepthSenseDriver::onNewDepthNodeSampleReceived);
+
+    DepthSense::FrameFormat_toResolution(configuration.frameFormat, &width, &height);
+    range = depthNode.getRange();
+
+    ROS_INFO("---------------------------------------------------");
+    return true;
+}
+
+bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node node, int32_t &width, int32_t &height )
+{
+    ROS_INFO_STREAM("--- New Color Node  ------------------------------------");
+
+    ROS_INFO( " Node type: %s - VID: %04x - PID: %04x - Revision: %04d  \n"
+              , node.getType().name().c_str()
+              , node.getVID()
+              , node.getPID()
+              , node.getRevision() );
+
+    DepthSense::ColorNode colorNode = node.as<DepthSense::ColorNode>();
+
+    DepthSense::ColorNode::Configuration configuration = colorNode.getConfiguration();
+
+    ROS_INFO(" Available configurations:");
+    std::vector<DepthSense::ColorNode::Configuration> configurations = colorNode.getConfigurations();
+    for (unsigned int i = 0; i < configurations.size(); i++)
+    {
+        ROS_INFO("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
+                 configurations[i].framerate,
+                 DepthSense::CompressionType_toString(configurations[i].compression).c_str(),
+                 DepthSense::PowerLineFrequency_toString(configurations[i].powerLineFrequency).c_str());
+    }
+
+    colorNode.setEnableColorMap(true); // TODO PARAM
+    colorNode.setEnableCompressedData(false); // TODO PARAM    
+
+    configuration.frameFormat=DepthSense::FRAME_FORMAT_VGA;
+    configuration.compression=DepthSense::COMPRESSION_TYPE_MJPEG;
+
+    bool doSetConfiguration = true;
+
+    if (doSetConfiguration)
+    {
+        try {
+            _context.requestControl(colorNode, 0);
+        }
+
+        catch (DepthSense::Exception&) {
+            ROS_INFO("---------------------------------------------------");
+            //CONTEXT_QUIT(_context);
+            contextQuit();
+            return false;
+        }
+        
+        //colorNode.setExposureAuto( DepthSense::EXPOSURE_AUTO_APERTURE_PRIORITY);
+        //colorNode.setExposureAutoPriority( false );  // TODO create param
+        colorNode.setWhiteBalanceAuto( true );  // TODO create param
+
+        try {
+            colorNode.setConfiguration(configuration);
+            _context.releaseControl(colorNode);
+        }
+        catch (std::exception&) {
+            ROS_INFO("---------------------------------------------------");
+            ROS_INFO("Incorrect configuration :");
+            ROS_INFO(" - Frame format: %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str());
+            ROS_INFO(" - Frame rate: %d fps", configuration.framerate);
+            _error = true;
+            //CONTEXT_QUIT(_context);
+            contextQuit();
+            return false;
+        }
+    }
+    configuration = colorNode.getConfiguration();
+    ROS_INFO(" color node streaming enabled - current configuration:");
+    ROS_INFO("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str(),
+             configuration.framerate,
+             DepthSense::CompressionType_toString(configuration.compression).c_str(),
+             DepthSense::PowerLineFrequency_toString(configuration.powerLineFrequency).c_str());
+
+    colorNode.newSampleReceivedEvent().connect(this, &DepthSenseDriver::onNewColorNodeSampleReceived);
+
+    DepthSense::FrameFormat_toResolution(configuration.frameFormat, &width, &height);
+
+    ROS_INFO("---------------------------------------------------");
+
+    return true;
+}
+
+bool DepthSenseDriver::addAudioNode(DepthSense::Device device, DepthSense::Node node )
+{
+    ROS_INFO_STREAM("--- New Audio Node  ------------------------------------");
+
+    ROS_INFO( " Node type: %s - VID: %04x - PID: %04x - Revision: %04d"
+              , node.getType().name().c_str()
+              , node.getVID()
+              , node.getPID()
+              , node.getRevision() );
+
+    ROS_INFO_STREAM("--- Audio node not yet supported -------");
+
+    ROS_INFO("---------------------------------------------------");
+
+    return false;
+}
+
 void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node node)
 {
     if (_error)
         return;
-
-    //bool doRegister = false;
 
     int32_t width = 0;
     int32_t height = 0;
@@ -252,162 +448,21 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
 
     if( node.is<DepthSense::AudioNode>() )
     {
-        ROS_INFO_STREAM("--- Audio node not yet supported -------");
-        return;
+        if( !addAudioNode( device, node ) )
+            return;
     }
-
-    ROS_INFO_STREAM("--- Node added ------------------------------------");
-
-    ROS_INFO( " Node type: %s \n"
-              " VID:       %04x \n"
-              " PID:       %04x \n"
-              " Revision:  %04d \n"
-              , node.getType().name().c_str()
-              , node.getVID()
-              , node.getPID()
-              , node.getRevision() );
 
     if (node.is<DepthSense::DepthNode>())
     {
-        DepthSense::DepthNode n = node.as<DepthSense::DepthNode>();
-
-        DepthSense::DepthNode::Configuration configuration = n.getConfiguration();
-
-        ROS_INFO_STREAM(" Available configurations:");
-        std::vector<DepthSense::DepthNode::Configuration> configurations = n.getConfigurations();
-
-        for (unsigned int i = 0; i < configurations.size(); i++)
-        {
-            ROS_INFO("    %s - %d fps - %s - saturation %s",
-                     DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
-                     configurations[i].framerate,
-                     DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
-                     configurations[i].saturation ? "enabled" : "disabled");
-        }
-
-        n.setEnableDepthMap(false);
-        n.setEnableVerticesFloatingPoint(true);
-        n.setEnableVertices(false);
-        n.setEnableUvMap(false);
-        n.setEnableAccelerometer(false);
-        bool doSetConfiguration = true;
-
-        if (doSetConfiguration)
-        {
-            try
-            {
-                _context.requestControl(n, 0);
-            }
-
-            catch (DepthSense::Exception&)
-            {
-                ROS_INFO_STREAM("---------------------------------------------------");
-                ROS_ERROR_STREAM("Error : Could not take control");
-
-                _error = true;
-                //CONTEXT_QUIT(_context);
-                contextQuit();
-
-                return;
-            }
-
-            n.setConfidenceThreshold(100); // TODO PARAM ?
-
-            try
-            {
-                n.setConfiguration(configuration);
-                _context.releaseControl(n);
-            }
-            catch (std::exception&)
-            {
-                ROS_INFO_STREAM("---------------------------------------------------");
-                ROS_INFO("Incorrect configuration :");
-                ROS_INFO(" - Frame format: %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str());
-                ROS_INFO(" - Frame rate: %d fps", configuration.framerate);
-                ROS_INFO(" - Mode: %s", DepthSense::DepthNode::CameraMode_toString(configuration.mode).c_str());
-                ROS_INFO(" - Saturation: %s", configuration.saturation ? "enabled" : "disabled");
-                _error = true;
-
-                //CONTEXT_QUIT(_context);
-                contextQuit();
-                return;
-            }
-        }
-
-        ROS_INFO(" Depth node streaming enabled - current configuration:");
-        ROS_INFO("    %s - %d fps - %s - saturation %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str(),
-                 configuration.framerate,
-                 DepthSense::DepthNode::CameraMode_toString(configuration.mode).c_str(),
-                 configuration.saturation ? "enabled" : "disabled");
-
-        n.newSampleReceivedEvent().connect (this, &DepthSenseDriver::onNewDepthNodeSampleReceived);
-
-        DepthSense::FrameFormat_toResolution(configuration.frameFormat, &width, &height);
-        range = n.getRange();
+        if( !addDepthNode( device, node, width, height, range ) )
+            return;
     }
-    else if ( node.is<DepthSense::ColorNode>() )
+
+    if ( node.is<DepthSense::ColorNode>() )
     {
-        DepthSense::ColorNode c = node.as<DepthSense::ColorNode>();
-
-        DepthSense::ColorNode::Configuration configuration = c.getConfiguration();
-
-        ROS_INFO(" Available configurations:");
-        std::vector<DepthSense::ColorNode::Configuration> configurations = c.getConfigurations();
-        for (unsigned int i = 0; i < configurations.size(); i++)
-        {
-            ROS_INFO("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
-                     configurations[i].framerate,
-                     DepthSense::CompressionType_toString(configurations[i].compression).c_str(),
-                     DepthSense::PowerLineFrequency_toString(configurations[i].powerLineFrequency).c_str());
-        }
-
-        c.setEnableColorMap(true); // TODO PARAM
-        c.setEnableCompressedData(false); // TODO PARAM
-        configuration.frameFormat=DepthSense::FRAME_FORMAT_VGA;
-        configuration.compression=DepthSense::COMPRESSION_TYPE_MJPEG;
-
-        bool doSetConfiguration = true;
-
-        if (doSetConfiguration)
-        {
-            try {
-                _context.requestControl(c, 0);
-            }
-
-            catch (DepthSense::Exception&) {
-                ROS_INFO("---------------------------------------------------");
-                //CONTEXT_QUIT(_context);
-                contextQuit();
-                return;
-            }
-
-            try {
-                c.setConfiguration(configuration);
-                _context.releaseControl(c);
-            }
-            catch (std::exception&) {
-                ROS_INFO("---------------------------------------------------");
-                ROS_INFO("Incorrect configuration :");
-                ROS_INFO(" - Frame format: %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str());
-                ROS_INFO(" - Frame rate: %d fps", configuration.framerate);
-                _error = true;
-                //CONTEXT_QUIT(_context);
-                contextQuit();
-                return;
-            }
-        }
-        configuration = c.getConfiguration();
-        ROS_INFO(" color node streaming enabled - current configuration:");
-        ROS_INFO("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configuration.frameFormat).c_str(),
-                 configuration.framerate,
-                 DepthSense::CompressionType_toString(configuration.compression).c_str(),
-                 DepthSense::PowerLineFrequency_toString(configuration.powerLineFrequency).c_str());
-
-        c.newSampleReceivedEvent().connect(this, &DepthSenseDriver::onNewColorNodeSampleReceived);
-
-        DepthSense::FrameFormat_toResolution(configuration.frameFormat, &width, &height);
+        if( !addColorNode( device, node, width, height ) )
+            return;
     }
-    ROS_INFO("---------------------------------------------------");
 
     if (node.is<DepthSense::UnsupportedNode>())
     {
@@ -432,6 +487,7 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
         ROS_ERROR("Couldn't start streaming : %s", e.what());
         exit(-1);
     }
+
     if (!node.is<DepthSense::UnsupportedNode>())
     {
         NodeInfo* info = new NodeInfo;
@@ -446,7 +502,6 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
 
         _nodeInfos.push_back(info);
     }
-
 }
 
 void DepthSenseDriver::onNodeRemoved(DepthSense::Device device, DepthSense::Node node)
@@ -494,68 +549,8 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
 
     ++info->totalSampleCount;
     ++info->sampleCount;
-
-    ROS_INFO_STREAM( "Received color frame #" << info->sampleCount );
-    //    std_msgs::Header msgheader;
-    //    msgheader.stamp = ros::Time::now();
-    //    msgheader.seq = info->totalSampleCount;
-    //    msgheader.frame_id = "camera_color_frame";
-
-    //    Mat rgbImg(info->height, info->width, CV_8UC3, (uint8_t*)rawimg);
-    ////broadcast raw color image
-    //    cv_bridge::CvImage rgb_msg;
-    //    rgb_msg.header   = msgheader;
-    //    rgb_msg.encoding = sensor_msgs::image_encodings::BGR8;
-    //    rgb_msg.image    = rgbImg;
-    //    raw_rgb.publish(rgb_msg.toImageMsg());
-
-    ////convert rgb to hsv
-    //    Mat hsvImg;
-    //    cv::cvtColor(rgbImg, hsvImg, CV_BGR2HSV);
-
-    ////split and process image in hsv color space
-    //    vector<Mat> hsv_planes;
-    //    split( hsvImg, hsv_planes );
-    //    Mat h_plane;
-    //    Mat h_plane2;
-    //    Mat s_plane;
-    //    threshold(hsv_planes[0], h_plane, 25, 255, THRESH_BINARY_INV);
-    //    threshold(h_plane, h_plane2, 155, 255, THRESH_BINARY);
-    //    threshold(hsv_planes[1], s_plane, 128, 255, THRESH_BINARY);
-
-    ////write resultant mask to global object
-    //    hsvmtx.lock();
-    //    bitwise_and(h_plane2,s_plane,filteredhsv);
-    //    hsvmtx.unlock();
-
-    ////broadcast hsv filter image
-
-    //    cv_bridge::CvImage hsvfilter_msg;
-    //    hsvfilter_msg.header   = msgheader;
-    //    hsvfilter_msg.encoding = sensor_msgs::image_encodings::MONO8;
-    //    hsvfilter_msg.image    = filteredhsv;
-    //    hsvfilter.publish(hsvfilter_msg.toImageMsg());
-
-
-    ////reduce image to line and sum
-    //    Mat hsvHistogram;
-    //    Scalar hsvSummation;
-    //    double maxval;
-    //    Point maxidx;
-    //    reduce(filteredhsv,hsvHistogram,0,CV_REDUCE_SUM,CV_32SC1);
-    //    minMaxLoc(hsvHistogram, NULL, &maxval, NULL, &maxidx);
-    //    hsvSummation = cv::sum(hsvHistogram);
-
-    ////broadcast projected target
-    //    geometry_msgs::PointStamped projected;
-    //    projected.header = msgheader;
-    //    projected.point.x = 1;
-    //    projected.point.y = float(maxidx.x-320)/-587.f;
-    //    projected.point.z = 0;
-    //    if (hsvSummation[0] > 10000) {
-    //        projected_target.publish(projected);
-    //    }
-
+    
+    
 
 
 }
@@ -584,181 +579,67 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
     ++info->totalSampleCount;
     ++info->sampleCount;
 
-    ROS_INFO_STREAM( "Received depth frame #" << info->sampleCount );
+    // ROS_INFO_STREAM( "Received depth frame #" << info->sampleCount );
 
     //const DepthSense::FPVertex* floatVertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
     //const DepthSense::UV* uv = (const DepthSense::UV*) data.uvMap;
     //const DepthSense::DepthNode::Acceleration acceleration = data.acceleration;
 
     // >>>>> float Point Clouds (data in m)
-
-    const DepthSense::FPVertex* vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
-
-    //prep a consistent header
-    std_msgs::Header msgheader;
-    msgheader.stamp = ros::Time::now();
-    msgheader.seq = info->totalSampleCount;
-    msgheader.frame_id = "depth_frame";
-
-    sensor_msgs::PointCloud2 msg;
-    msg.header = msgheader;
-
-    int pointsCount = info->width * info->height;
-
-    msg.fields.resize(3);
-    msg.fields[0].name = "x";
-    msg.fields[0].offset = 0;
-    msg.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
-    msg.fields[0].count = pointsCount;
-    msg.fields[1].name = "y";
-    msg.fields[1].offset = sizeof(float);
-    msg.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
-    msg.fields[1].count = pointsCount;
-    msg.fields[2].name = "z";
-    msg.fields[2].offset = 2*sizeof(float);
-    msg.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
-    msg.fields[2].count = pointsCount;
-
-    msg.width = info->width;
-    msg.height = info->height;
-    msg.is_dense = true;
-    msg.is_bigendian = false;
-    msg.point_step = sizeof(float) * 3;
-    msg.row_step = msg.point_step * msg.width;
-
-    int cloudSize = pointsCount * msg.point_step;
-    msg.data.resize( cloudSize );
-
-    memcpy( (uint8_t*)(&msg.data[0]), (uint8_t*)(&vertex[0]), cloudSize );
-    /*for( int i=0; i<pointsCount; i++)
+    const DepthSense::FPVertex* fp_vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
+    if( fp_vertex!=NULL )
     {
-        msg.data[i*3+0] = vertex[i].x;
-        msg.data[i*3+1] = vertex[i].y;
-        msg.data[i*3+2] = vertex[i].z;
-    }*/
+        //prep a consistent header
+        std_msgs::Header msgheader;
+        msgheader.stamp = ros::Time::now();
+        msgheader.seq = info->totalSampleCount;
+        msgheader.frame_id = "depth_frame";
 
-    _vertex_pub.publish( msg );
+        sensor_msgs::PointCloud2 msg;
+        msg.header = msgheader;
 
-    if(_publish_tf)
-    {
-        static tf::TransformBroadcaster br;
-        tf::Transform transform;
-        transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
-        tf::Quaternion q;
-        q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 90.0*DEG2RAD);
-        transform.setRotation(q);
-        br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );
+        int ptsCount = info->width * info->height;
+
+        msg.fields.resize(3);
+        msg.fields[0].name = "x";
+        msg.fields[0].offset = 0;
+        msg.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+        msg.fields[0].count = ptsCount;
+        msg.fields[1].name = "y";
+        msg.fields[1].offset = sizeof(float);
+        msg.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+        msg.fields[1].count = ptsCount;
+        msg.fields[2].name = "z";
+        msg.fields[2].offset = 2*sizeof(float);
+        msg.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+        msg.fields[2].count = ptsCount;
+
+        msg.width = info->width;
+        msg.height = info->height;
+        msg.is_dense = true;
+        msg.is_bigendian = false;
+        msg.point_step = sizeof(float) * 3;
+        msg.row_step = msg.point_step * msg.width;
+
+        int cloudSize = ptsCount * msg.point_step;
+        msg.data.resize( cloudSize );
+
+        memcpy( (uint8_t*)(&msg.data[0]), (uint8_t*)(&fp_vertex[0]), cloudSize );
+
+        _vertex_pub.publish( msg );
+
+        if(_publish_tf)
+        {
+            static tf::TransformBroadcaster br;
+            tf::Transform transform;
+            transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
+            tf::Quaternion q;
+            q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 90.0*DEG2RAD);
+            transform.setRotation(q);
+            br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );
+        }
     }
     // <<<<< float Point Clouds (data in m)
-
-
-    ////broadcast acclerometer data
-    //    geometry_msgs::PointStamped accel;
-    //    accel.header = msgheader;
-    //    accel.point.x = data.acceleration.x;
-    //    accel.point.y = data.acceleration.y;
-    //    accel.point.z = data.acceleration.z;
-    //    accel_data.publish(accel);
-
-    ////make uvmap image from uv data
-    //    Mat uvMap(info->height, info->width, CV_32FC2, (float *)uv );
-    //    //broadcast uvmap image
-    //    cv_bridge::CvImage uvmap_msg;
-    //    uvmap_msg.header   = msgheader;
-    //    uvmap_msg.encoding = sensor_msgs::image_encodings::TYPE_32FC2;
-    //    uvmap_msg.image    = uvMap;
-    //    raw_uvmap.publish(uvmap_msg.toImageMsg());
-
-    ////pull in hsv data from camera thread
-    //    hsvmtx.lock();
-    //    Mat hsvmask = filteredhsv;
-    //    hsvmtx.unlock();
-
-    ////generate cloud of target color points
-    //    pcl::PointCloud<pcl::PointXYZ>::Ptr cloudtargetmeasured(new pcl::PointCloud<pcl::PointXYZ>);
-    //    pcl::PointCloud<pcl::PointXYZ>::Ptr final (new pcl::PointCloud<pcl::PointXYZ>);
-    //    std::vector<int> hsvindices;
-    //    for (int i=0; i < uvMap.total(); ++i) {
-    //        if (((float*)uv)[i*2] == -FLT_MAX) continue;
-    //        if ( hsvmask.at<uchar>( floor(480*((float*)uv)[i*2+1])*640 + floor(640*((float*)uv)[i*2]) ) ){
-    //            hsvindices.push_back(i);
-    //            cloudtargetmeasured->push_back(pcl::PointXYZ(floatVertex[i].x,floatVertex[i].y,floatVertex[i].z));
-    //        }
-    //    }
-
-    ////check if points fit spherical model
-    //    std::vector<int> inliers;
-    //    Eigen::VectorXf model_coefficients;
-    //    pcl::SampleConsensusModelSphere<pcl::PointXYZ>::Ptr model_s(new pcl::SampleConsensusModelSphere<pcl::PointXYZ> (cloudtargetmeasured));
-    //    model_s->setRadiusLimits(0.08,0.13);
-    //    pcl::RandomSampleConsensus<pcl::PointXYZ> ransac (model_s);
-    //    ransac.setDistanceThreshold (.01);
-    //    ransac.computeModel();
-    //    ransac.getInliers(inliers);
-    //    ransac.getModelCoefficients(model_coefficients);
-    //    pcl::copyPointCloud<pcl::PointXYZ>(*cloudtargetmeasured, inliers, *final);
-
-
-    ////broadcast sphere points
-    //    sensor_msgs::PointCloud2 targetpcl_out;
-    //    pcl::toROSMsg(*final, targetpcl_out);
-    //    targetpcl_out.header = msgheader;
-    //    target_cloud.publish(targetpcl_out);
-
-    ////broadcast sphere centroid if confidence is high
-    ///*	if (final->points.size()) { ROS_INFO("%f %f %f %f -- %04d %04d -- %f %s", model_coefficients[0], model_coefficients[1], model_coefficients[2], model_coefficients[3],
-    //        cloudtargetmeasured->size(),final->points.size(),
-    //        (float)final->points.size()/(float)cloudtargetmeasured->points.size(),
-    //        final->points.size() > 200 && (float)final->points.size()/(float)cloudtargetmeasured->points.size() > 0.75 ? "pass" : "fail"); }
-    //*/
-    //    geometry_msgs::PointStamped measured;
-    //    if (final->points.size() > 200 && (float)final->points.size()/(float)cloudtargetmeasured->points.size() > 0.75) {
-    //        measured.header = msgheader;
-    //        measured.point.x = model_coefficients[0];
-    //        measured.point.y = model_coefficients[1];
-    //        measured.point.z = model_coefficients[2];
-    //        measured_target.publish(measured);
-    ////ROS_INFO("raw %d - radius %f - count %d - ratio %f\n", cloudtargetmeasured->points.size(), model_coefficients[3], final->points.size(),
-    ////        (float)final->points.size()/(float)cloudtargetmeasured->points.size());
-    //    }
-
-    ////create obstacle map from pcl, assume the gimbal keeps the camera level
-    //    Mat obstacle = Mat::zeros(41, 41, CV_8UC1);
-    //    Mat obstaclethresh;
-    //    int idx = 0;
-    //    for (size_t i = 0; i < info->height*info->width; ++i) {
-    //        if (floatVertex[i].z < 0.f || floatVertex[i].z > 2.f ||
-    //            floatVertex[i].x < -1.f || floatVertex[i].x > 1.f ||
-    //            floatVertex[i].y > 0.15 || floatVertex[i].y < -0.15) continue;
-
-    //        int xidx = round(floatVertex[i].z*20);
-    //        int yidx = round(-floatVertex[i].x*20)+20;
-
-    //        if (obstacle.at<uchar>(xidx,yidx) < 255) obstacle.at<uchar>(xidx,yidx) += 1;
-    //    }
-
-    //    Mat element = getStructuringElement( MORPH_ELLIPSE, Size( 8, 8 ) );
-    //    threshold(obstacle, obstaclethresh, 10, 255, THRESH_BINARY);
-    //    dilate(obstaclethresh,obstacle,element);
-    //    cv_bridge::CvImage obstacle_msg;
-    //    obstacle_msg.header   = msgheader;
-    //    obstacle_msg.encoding = sensor_msgs::image_encodings::MONO8;
-    //    obstacle_msg.image    = obstacle;
-    //    obstacle_image.publish(obstacle_msg.toImageMsg());
-
-    ////broadcast points
-    ////totally destroys performance
-    ///*
-    //    pcl::PointCloud<pcl::PointXYZ>::Ptr raw(new pcl::PointCloud<pcl::PointXYZ>);
-    //    for (size_t i = 0; i < info->height*info->width; ++i) {
-    //        raw->push_back(pcl::PointXYZ(floatVertex[i].x,floatVertex[i].y,floatVertex[i].z));
-    //    }
-
-    //    sensor_msgs::PointCloud2 rawpcl_out;
-    //    pcl::toROSMsg(*raw, rawpcl_out);
-    //    rawpcl_out.header = msgheader;
-    //    raw_cloud.publish(rawpcl_out);
-    //*/
 
 }
 

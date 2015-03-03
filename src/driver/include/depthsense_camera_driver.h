@@ -36,6 +36,10 @@ private:
     void onNodeAdded(DepthSense::Device device, DepthSense::Node node);
     void onNodeRemoved(DepthSense::Device device, DepthSense::Node node);
 
+    bool addDepthNode(DepthSense::Device device, DepthSense::Node node, int32_t& width, int32_t& height , float& range);
+    bool addColorNode(DepthSense::Device device, DepthSense::Node node, int32_t& width, int32_t& height );
+    bool addAudioNode(DepthSense::Device device, DepthSense::Node node);
+
     NodeInfo* findInfo(DepthSense::Node node);
 
     void onNewDepthNodeSampleReceived(DepthSense::DepthNode node, DepthSense::DepthNode::NewSampleReceivedData data);
