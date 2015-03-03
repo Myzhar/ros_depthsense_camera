@@ -30,18 +30,18 @@ project(depthsense_camera_ros)
 ## Options
 option( DEBUG_ACTIVE "Enable Debug build" ON )
 
-IF(DEBUG_ACTIVE)
+if(DEBUG_ACTIVE)
     MESSAGE( "Debug compilation active" )
     set(ROS_BUILD_TYPE Debug)
     set(CMAKE_BUILD_TYPE Debug)
-ELSE()
+else()
     MESSAGE( "Release compilation active" )
     set(ROS_BUILD_TYPE Release)
     set(CMAKE_BUILD_TYPE Release)
-ENDIF()
+endif()
 ###############################################################################
 
-#########################################################
+###############################################################################
 ## CUDA
 find_package(CUDA)
 if(CUDA_FOUND)
@@ -62,7 +62,7 @@ if(CUDA_FOUND)
         set(CUDA_HAVE_GPU FALSE CACHE BOOL "Whether CUDA-capable GPU is present")
     endif()
 endif(CUDA_FOUND)
-#########################################################
+###############################################################################
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -77,7 +77,7 @@ catkin_package(
     geometry_msgs
 )
 
-#########################################################
+###############################################################################
 # INCLUDES
 
 set(depthsense_INC_DIRS
@@ -91,30 +91,53 @@ include_directories(
 	${catkin_INCLUDE_DIRS} 
 	${depthsense_INC_DIRS}
 )
-#########################################################
+###############################################################################
 
-#########################################################
+###############################################################################
+# CUDA SOURCES
+if(CUDA_HAVE_GPU)
+    add_definitions(-DWITH_CUDA)
+
+    set(cuda_SRC_DIR src/driver/cuda)
+
+    set(cuda_SRC ${cuda_SRC_DIR}/)
+
+    SET(CUDA_NVCC_FLAGS "-arch=sm_13" CACHE STRING "nvcc flags" FORCE)
+
+    #HW capability 1.3
+    SET (CUDA_VERBOSE_BUILD ON CACHE BOOL "nvcc verbose" FORCE)
+
+    SET(LIB_TYPE STATIC) #set the lib type
+    CUDA_ADD_LIBRARY(Cuda2Dscan ${LIB_TYPE} ${cuda_SRC} )
+endif(CUDA_HAVE_GPU)
+###############################################################################
+
+###############################################################################
 # SOURCES
 set(depthsense_SRC
     src/depthsense_camera_node.cpp
     src/driver/src/depthsense_camera_driver.cpp
 )
-#########################################################
+###############################################################################
 
-
-
-#########################################################
+###############################################################################
 # EXECUTABLE
 add_executable(
   depthsense_camera_node
   ${depthsense_SRC}
 )
 
-FIND_LIBRARY(DEPTHSENSE_LIBRARY DepthSense DepthSensePlugins turbojpeg /opt/softkinetic/DepthSenseSDK/lib/)
+find_library(DEPTHSENSE_LIBRARY DepthSense DepthSensePlugins turbojpeg /opt/softkinetic/DepthSenseSDK/lib/)
 
-target_link_libraries(
-  depthsense_camera_node
-  ${catkin_LIBRARIES} ${DEPTHSENSE_LIBRARY}
-)
-#########################################################
+if(CUDA_HAVE_GPU)
+    add_dependencies(depthsense_camera_node Cuda2Dscan)
+    target_link_libraries(depthsense_camera_node
+        ${catkin_LIBRARIES} ${DEPTHSENSE_LIBRARY} Cuda2Dscan)
+else()
+    target_link_libraries(
+        depthsense_camera_node
+        ${catkin_LIBRARIES} ${DEPTHSENSE_LIBRARY}
+    )
+endif(CUDA_HAVE_GPU)
+###############################################################################
 
