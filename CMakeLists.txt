@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.7)
 
-project(depthsense_camera_ros)
+project(ros_depthsense_camera)
 
 ###############################################################################
 ## Note by Myzhar                                                            ##
