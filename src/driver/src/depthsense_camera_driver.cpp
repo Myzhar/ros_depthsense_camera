@@ -628,12 +628,11 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
             tf::Transform transform;
             transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
             tf::Quaternion q;
-            q.setRPY(0.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
+            q.setRPY(-90.0*DEG2RAD, 0.0*DEG2RAD, -90.0*DEG2RAD);
             transform.setRotation(q);
             br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
         }
     }
-
     // <<<<< RGB frame
 
 }
@@ -684,7 +683,7 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
         int ptsCount = info->width * info->height;
 
         msg.fields.resize(3);
-        msg.fields[0].name = "x";
+        msg.fields[0].name = "z";
         msg.fields[0].offset = 0;
         msg.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
         msg.fields[0].count = ptsCount;
@@ -692,7 +691,7 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
         msg.fields[1].offset = sizeof(float);
         msg.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
         msg.fields[1].count = ptsCount;
-        msg.fields[2].name = "z";
+        msg.fields[2].name = "x";
         msg.fields[2].offset = 2*sizeof(float);
         msg.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
         msg.fields[2].count = ptsCount;
@@ -717,7 +716,7 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
             tf::Transform transform;
             transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
             tf::Quaternion q;
-            q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 90.0*DEG2RAD);
+            q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
             transform.setRotation(q);
             br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );
         }
@@ -727,9 +726,11 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
     // <<<<< float Point Cloud (data in m)
 
     // >>>>> RGB Point Cloud (data in m)
-    /*const DepthSense::UV* fp_vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
-    if( fp_vertex!=NULL )
-    {}*/
+    const DepthSense::UV* uv_map = (const DepthSense::UV*) data.uvMap;
+    if( uv_map!=NULL )
+    {
+
+    }
     // <<<<< RGB Point Cloud (data in m)
 
 }
