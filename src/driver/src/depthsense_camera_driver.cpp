@@ -1,12 +1,19 @@
 #include "depthsense_camera_driver.h"
 #include <std_msgs/Header.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/CameraInfo.h>
 
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
 
 #ifndef DEG2RAD
 #define DEG2RAD 0.017444444
+#define RAD2DEG 57.324842225
+#endif
+#ifndef RAD2DEG
+#define RAD2DEG 57.324842225
 #endif
 
 bool DepthSenseDriver::_stopping = false;
@@ -15,13 +22,18 @@ DepthSenseDriver::DepthSenseDriver()
     : _initialized(false)
     , _streaming(false)
     , _error(false)
+    , _imgTr(_nh)
 {
     struct sigaction sigAct;
-    memset(&sigAct, 0, sizeof(sigAct));
+    memset( &sigAct, 0, sizeof(sigAct) );
     sigAct.sa_handler = DepthSenseDriver::sighandler;
     sigaction(SIGINT, &sigAct, 0);
 
     _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_data", 1, false);
+
+    _rgb_pub = _imgTr.advertiseCamera("rgb_image", 1, false);
+
+
     _publish_tf = true;
 }
 
@@ -47,7 +59,7 @@ void DepthSenseDriver::contextQuit()
 
 bool DepthSenseDriver::init()
 {
-    if (_initialized)
+    if( _initialized )
     {
         return true;
     }
@@ -75,7 +87,7 @@ bool DepthSenseDriver::init()
 
             ros::Duration(1.0).sleep(); // sleep for 1 seconds
         }
-    }while( devices.size()==0 );
+    } while( devices.size()==0 );
 
     _context.deviceAddedEvent().connect(this, &DepthSenseDriver::onDeviceAdded);
     _context.deviceRemovedEvent().connect(this, &DepthSenseDriver::onDeviceRemoved);
@@ -365,7 +377,7 @@ bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node 
     }
 
     colorNode.setEnableColorMap(true); // TODO PARAM
-    colorNode.setEnableCompressedData(false); // TODO PARAM    
+    colorNode.setEnableCompressedData(false); // TODO PARAM
 
     configuration.frameFormat=DepthSense::FRAME_FORMAT_VGA;
     configuration.compression=DepthSense::COMPRESSION_TYPE_MJPEG;
@@ -501,6 +513,7 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
         info->range = range;
 
         _nodeInfos.push_back(info);
+
     }
 }
 
@@ -532,16 +545,17 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         return;
     }
 
-    const uint8_t* rawimg;
-    const uint8_t* compressedimg;
-
     NodeInfo* info = findInfo(node);
     if (info == NULL) {
         return;
     }
 
-    rawimg = (const uint8_t*) data.colorMap;
-    //    compressedimg = (const uint8_t*) data.compressedData;
+
+
+    // TODO Handle compressed images
+
+    //const uint8_t* compressedimg;
+    //compressedimg = (const uint8_t*) data.compressedData;
 
     if (info->totalSampleCount == 0) {
         info->sampleCount = 0;
@@ -550,8 +564,65 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
     ++info->totalSampleCount;
     ++info->sampleCount;
     
-    
+    // >>>>> RGB frame
+    const uint8_t* rawimg = (const uint8_t*) data.colorMap;
 
+    if( rawimg!=NULL )
+    {
+
+        //prep a consistent header
+        std_msgs::Header msgheader;
+        msgheader.stamp = ros::Time::now();
+        msgheader.seq = info->totalSampleCount;
+        msgheader.frame_id = "rgb_frame";
+
+        sensor_msgs::Image msg;
+        msg.header = msgheader;
+
+        msg.width = info->width;
+        msg.height = info->height;
+        msg.encoding = sensor_msgs::image_encodings::BGR8; // TODO verify if BGR or RGB
+
+        msg.step = info->width * 3;
+
+        int imgSize = msg.height * msg.step;
+        msg.data.resize( imgSize );
+
+        memcpy( (uint8_t*)(&msg.data[0]), (uint8_t*)(&rawimg[0]), imgSize );
+
+        // >>>>> Camera info
+        sensor_msgs::CameraInfo cam_info_msg;
+
+        cam_info_msg.D.resize(5);
+        cam_info_msg.D[0] = 0.0;
+        cam_info_msg.K.fill( 0.0 );
+        cam_info_msg.R.fill( 0.0 );
+        cam_info_msg.P.fill( 0.0 );
+        cam_info_msg.P[0] = 1.0;
+        cam_info_msg.P[5] = 1.0;
+        cam_info_msg.P[10] = 1.0;
+
+        cam_info_msg.header = msgheader;
+
+        cam_info_msg.width = info->width;
+        cam_info_msg.height = info->height;
+        // <<<<< Camera info
+
+        _rgb_pub.publish( msg, cam_info_msg );
+
+        if(_publish_tf)
+        {
+            static tf::TransformBroadcaster br;
+            tf::Transform transform;
+            transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
+            tf::Quaternion q;
+            q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 90.0*DEG2RAD);
+            transform.setRotation(q);
+            br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
+        }
+    }
+
+    // <<<<< RGB frame
 
 }
 
@@ -638,6 +709,8 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
             transform.setRotation(q);
             br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );
         }
+
+        // TODO send 2d virtual laser scan message
     }
     // <<<<< float Point Clouds (data in m)
 

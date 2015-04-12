@@ -3,6 +3,7 @@
 #include <ros/ros.h>
 #include <csignal>
 #include <list>
+#include <image_transport/image_transport.h>
 
 using namespace std;
 
@@ -59,6 +60,10 @@ private:
 private:
     ros::NodeHandle _nh;
     ros::Publisher _vertex_pub;
+
+    // Image transportation
+    image_transport::ImageTransport _imgTr;
+    image_transport::CameraPublisher _rgb_pub;
 
     DepthSense::Context _context; ///< DepthSense context
 
