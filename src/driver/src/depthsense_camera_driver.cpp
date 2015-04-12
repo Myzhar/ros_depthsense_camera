@@ -4,6 +4,7 @@
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/CameraInfo.h>
+#include <sensor_msgs/distortion_models.h>
 
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
@@ -202,47 +203,47 @@ void DepthSenseDriver::onDeviceAdded(DepthSense::Context context, DepthSense::De
     DepthSense::StereoCameraParameters params;
     params = device.getStereoCameraParameters();
 
-    DepthSense::IntrinsicParameters depthIntrinsics = params.depthIntrinsics;
-    DepthSense::IntrinsicParameters colorIntrinsics = params.colorIntrinsics;
-    DepthSense::ExtrinsicParameters extrinsics = params.extrinsics;
+    _depthIntrinsics = params.depthIntrinsics;
+    _colorIntrinsics = params.colorIntrinsics;
+    _extrinsics = params.extrinsics;
 
     ROS_INFO("depth intrinsics: width %d, height %d, fx %f, fy %f, cx %f, cy %f, k1 %f, k2 %f, k3 %f, p1 %f, p2 %f",
-             depthIntrinsics.width,
-             depthIntrinsics.height,
-             depthIntrinsics.fx,
-             depthIntrinsics.fy,
-             depthIntrinsics.cx,
-             depthIntrinsics.cy,
-             depthIntrinsics.k1,
-             depthIntrinsics.k2,
-             depthIntrinsics.k3,
-             depthIntrinsics.p1,
-             depthIntrinsics.p2);
+             _depthIntrinsics.width,
+             _depthIntrinsics.height,
+             _depthIntrinsics.fx,
+             _depthIntrinsics.fy,
+             _depthIntrinsics.cx,
+             _depthIntrinsics.cy,
+             _depthIntrinsics.k1,
+             _depthIntrinsics.k2,
+             _depthIntrinsics.k3,
+             _depthIntrinsics.p1,
+             _depthIntrinsics.p2);
     ROS_INFO("color intrinsics: width %d, height %d, fx %f, fy %f, cx %f, cy %f, k1 %f, k2 %f, k3 %f, p1 %f, p2 %f",
-             colorIntrinsics.width,
-             colorIntrinsics.height,
-             colorIntrinsics.fx,
-             colorIntrinsics.fy,
-             colorIntrinsics.cx,
-             colorIntrinsics.cy,
-             colorIntrinsics.k1,
-             colorIntrinsics.k2,
-             colorIntrinsics.k3,
-             colorIntrinsics.p1,
-             colorIntrinsics.p2);
+             _colorIntrinsics.width,
+             _colorIntrinsics.height,
+             _colorIntrinsics.fx,
+             _colorIntrinsics.fy,
+             _colorIntrinsics.cx,
+             _colorIntrinsics.cy,
+             _colorIntrinsics.k1,
+             _colorIntrinsics.k2,
+             _colorIntrinsics.k3,
+             _colorIntrinsics.p1,
+             _colorIntrinsics.p2);
     ROS_INFO("extrinsics: r11 %f, r12 %f, r13 %f, r21 %f, r22 %f, r23 %f, r31 %f, r32 %f, r33 %f, t1 %f, t2 %f, t3 %f",
-             extrinsics.r11,
-             extrinsics.r12,
-             extrinsics.r13,
-             extrinsics.r21,
-             extrinsics.r22,
-             extrinsics.r23,
-             extrinsics.r31,
-             extrinsics.r32,
-             extrinsics.r33,
-             extrinsics.t1,
-             extrinsics.t2,
-             extrinsics.t3);
+             _extrinsics.r11,
+             _extrinsics.r12,
+             _extrinsics.r13,
+             _extrinsics.r21,
+             _extrinsics.r22,
+             _extrinsics.r23,
+             _extrinsics.r31,
+             _extrinsics.r32,
+             _extrinsics.r33,
+             _extrinsics.t1,
+             _extrinsics.t2,
+             _extrinsics.t3);
     ROS_INFO("---------------------------------------------------");
 
     device.nodeAddedEvent().connect(this, &DepthSenseDriver::onNodeAdded);
@@ -550,9 +551,7 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         return;
     }
 
-
-
-    // TODO Handle compressed images
+    // Compressed images are ignored. Using ROS Image Transportation!
 
     //const uint8_t* compressedimg;
     //compressedimg = (const uint8_t*) data.compressedData;
@@ -569,7 +568,6 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
 
     if( rawimg!=NULL )
     {
-
         //prep a consistent header
         std_msgs::Header msgheader;
         msgheader.stamp = ros::Time::now();
@@ -581,7 +579,7 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
 
         msg.width = info->width;
         msg.height = info->height;
-        msg.encoding = sensor_msgs::image_encodings::BGR8; // TODO verify if BGR or RGB
+        msg.encoding = sensor_msgs::image_encodings::BGR8;
 
         msg.step = info->width * 3;
 
@@ -593,13 +591,27 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         // >>>>> Camera info
         sensor_msgs::CameraInfo cam_info_msg;
 
+        cam_info_msg.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
+
         cam_info_msg.D.resize(5);
-        cam_info_msg.D[0] = 0.0;
+        cam_info_msg.D[0] = _colorIntrinsics.k1;
+        cam_info_msg.D[1] = _colorIntrinsics.k2;
+        cam_info_msg.D[2] = _colorIntrinsics.k3;
+        cam_info_msg.D[3] = _colorIntrinsics.p1;
+        cam_info_msg.D[4] = _colorIntrinsics.p2;
         cam_info_msg.K.fill( 0.0 );
+        cam_info_msg.K[0] = _colorIntrinsics.fx;
+        cam_info_msg.K[2] = _colorIntrinsics.cx;
+        cam_info_msg.K[4] = _colorIntrinsics.fy;
+        cam_info_msg.K[5] = _colorIntrinsics.cy;
+        cam_info_msg.K[8] = 1.0;
+
         cam_info_msg.R.fill( 0.0 );
         cam_info_msg.P.fill( 0.0 );
-        cam_info_msg.P[0] = 1.0;
-        cam_info_msg.P[5] = 1.0;
+        cam_info_msg.P[0] = _colorIntrinsics.fx;
+        cam_info_msg.P[2] = _colorIntrinsics.cx;
+        cam_info_msg.P[5] = _colorIntrinsics.fy;
+        cam_info_msg.P[6] = _colorIntrinsics.cy;
         cam_info_msg.P[10] = 1.0;
 
         cam_info_msg.header = msgheader;
@@ -616,7 +628,7 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
             tf::Transform transform;
             transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
             tf::Quaternion q;
-            q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 90.0*DEG2RAD);
+            q.setRPY(0.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
             transform.setRotation(q);
             br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
         }
@@ -712,7 +724,13 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
 
         // TODO send 2d virtual laser scan message
     }
-    // <<<<< float Point Clouds (data in m)
+    // <<<<< float Point Cloud (data in m)
+
+    // >>>>> RGB Point Cloud (data in m)
+    /*const DepthSense::UV* fp_vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
+    if( fp_vertex!=NULL )
+    {}*/
+    // <<<<< RGB Point Cloud (data in m)
 
 }
 

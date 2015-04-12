@@ -77,5 +77,11 @@ private:
     static bool _stopping;
 
     bool _publish_tf;
+
+    // >>>>> Camera parameters
+    DepthSense::IntrinsicParameters _depthIntrinsics;
+    DepthSense::IntrinsicParameters _colorIntrinsics;
+    DepthSense::ExtrinsicParameters _extrinsics;
+    // <<<<< Camera parameters
 };
 
