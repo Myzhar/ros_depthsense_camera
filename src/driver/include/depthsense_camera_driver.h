@@ -5,6 +5,10 @@
 #include <list>
 #include <image_transport/image_transport.h>
 
+#include <std_msgs/Header.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/PointCloud2.h>
+
 using namespace std;
 
 class DepthSenseDriver
@@ -83,5 +87,15 @@ private:
     DepthSense::IntrinsicParameters _colorIntrinsics;
     DepthSense::ExtrinsicParameters _extrinsics;
     // <<<<< Camera parameters
+
+    // >>>>> RGB ROS Message
+    std_msgs::Header _lastRgbMsgHeader;
+    sensor_msgs::Image _lastRgbMsg;
+    // <<<<< RGB ROS Message
+
+    // >>>>> Pointcloud ROS Message
+    std_msgs::Header _lastPtCloudMsgHeader;
+    sensor_msgs::PointCloud2 _lastPtCloud;
+    // <<<<< Pointcloud ROS Message
 };
 

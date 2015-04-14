@@ -1,7 +1,4 @@
 #include "depthsense_camera_driver.h"
-#include <std_msgs/Header.h>
-#include <sensor_msgs/PointCloud2.h>
-#include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/distortion_models.h>
@@ -569,24 +566,24 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
     if( rawimg!=NULL )
     {
         //prep a consistent header
-        std_msgs::Header msgheader;
-        msgheader.stamp = ros::Time::now();
-        msgheader.seq = info->totalSampleCount;
-        msgheader.frame_id = "rgb_frame";
 
-        sensor_msgs::Image msg;
-        msg.header = msgheader;
+        _lastRgbMsgHeader.stamp = ros::Time::now();
+        _lastRgbMsgHeader.seq = info->totalSampleCount;
+        _lastRgbMsgHeader.frame_id = "rgb_frame";
 
-        msg.width = info->width;
-        msg.height = info->height;
-        msg.encoding = sensor_msgs::image_encodings::BGR8;
 
-        msg.step = info->width * 3;
+        _lastRgbMsg.header = _lastRgbMsgHeader;
 
-        int imgSize = msg.height * msg.step;
-        msg.data.resize( imgSize );
+        _lastRgbMsg.width = info->width;
+        _lastRgbMsg.height = info->height;
+        _lastRgbMsg.encoding = sensor_msgs::image_encodings::BGR8;
 
-        memcpy( (uint8_t*)(&msg.data[0]), (uint8_t*)(&rawimg[0]), imgSize );
+        _lastRgbMsg.step = info->width * 3;
+
+        int imgSize = _lastRgbMsg.height * _lastRgbMsg.step;
+        _lastRgbMsg.data.resize( imgSize );
+
+        memcpy( (uint8_t*)(&_lastRgbMsg.data[0]), (uint8_t*)(&rawimg[0]), imgSize );
 
         // >>>>> Camera info
         sensor_msgs::CameraInfo cam_info_msg;
@@ -614,13 +611,13 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         cam_info_msg.P[6] = _colorIntrinsics.cy;
         cam_info_msg.P[10] = 1.0;
 
-        cam_info_msg.header = msgheader;
+        cam_info_msg.header = _lastRgbMsgHeader;
 
         cam_info_msg.width = info->width;
         cam_info_msg.height = info->height;
         // <<<<< Camera info
 
-        _rgb_pub.publish( msg, cam_info_msg );
+        _rgb_pub.publish( _lastRgbMsg, cam_info_msg );
 
         if(_publish_tf)
         {
@@ -672,43 +669,42 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
     if( fp_vertex!=NULL )
     {
         //prep a consistent header
-        std_msgs::Header msgheader;
-        msgheader.stamp = ros::Time::now();
-        msgheader.seq = info->totalSampleCount;
-        msgheader.frame_id = "depth_frame";
 
-        sensor_msgs::PointCloud2 msg;
-        msg.header = msgheader;
+        _lastPtCloudMsgHeader.stamp = ros::Time::now();
+        _lastPtCloudMsgHeader.seq = info->totalSampleCount;
+        _lastPtCloudMsgHeader.frame_id = "depth_frame";
+
+        _lastPtCloud.header = _lastPtCloudMsgHeader;
 
         int ptsCount = info->width * info->height;
 
-        msg.fields.resize(3);
-        msg.fields[0].name = "z";
-        msg.fields[0].offset = 0;
-        msg.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
-        msg.fields[0].count = ptsCount;
-        msg.fields[1].name = "y";
-        msg.fields[1].offset = sizeof(float);
-        msg.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
-        msg.fields[1].count = ptsCount;
-        msg.fields[2].name = "x";
-        msg.fields[2].offset = 2*sizeof(float);
-        msg.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
-        msg.fields[2].count = ptsCount;
+        _lastPtCloud.fields.resize(3);
+        _lastPtCloud.fields[0].name = "z";
+        _lastPtCloud.fields[0].offset = 0;
+        _lastPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+        _lastPtCloud.fields[0].count = ptsCount;
+        _lastPtCloud.fields[1].name = "y";
+        _lastPtCloud.fields[1].offset = sizeof(float);
+        _lastPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+        _lastPtCloud.fields[1].count = ptsCount;
+        _lastPtCloud.fields[2].name = "x";
+        _lastPtCloud.fields[2].offset = 2*sizeof(float);
+        _lastPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+        _lastPtCloud.fields[2].count = ptsCount;
 
-        msg.width = info->width;
-        msg.height = info->height;
-        msg.is_dense = true;
-        msg.is_bigendian = false;
-        msg.point_step = sizeof(float) * 3;
-        msg.row_step = msg.point_step * msg.width;
+        _lastPtCloud.width = info->width;
+        _lastPtCloud.height = info->height;
+        _lastPtCloud.is_dense = true;
+        _lastPtCloud.is_bigendian = false;
+        _lastPtCloud.point_step = sizeof(float) * 3;
+        _lastPtCloud.row_step = _lastPtCloud.point_step * _lastPtCloud.width;
 
-        int cloudSize = ptsCount * msg.point_step;
-        msg.data.resize( cloudSize );
+        int cloudSize = ptsCount * _lastPtCloud.point_step;
+        _lastPtCloud.data.resize( cloudSize );
 
-        memcpy( (uint8_t*)(&msg.data[0]), (uint8_t*)(&fp_vertex[0]), cloudSize );
+        memcpy( (uint8_t*)(&_lastPtCloud.data[0]), (uint8_t*)(&fp_vertex[0]), cloudSize );
 
-        _vertex_pub.publish( msg );
+        _vertex_pub.publish( _lastPtCloud );
 
         if(_publish_tf)
         {
