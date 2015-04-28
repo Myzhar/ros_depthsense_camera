@@ -26,6 +26,19 @@ public:
         float range;
     };
 
+    typedef union _RGBA
+    {
+        struct _color
+        {
+            uint8_t b;
+            uint8_t g;
+            uint8_t r;
+            uint8_t a;
+        } color;
+
+        float val;
+    } RGBA;
+
     DepthSenseDriver();
     ~DepthSenseDriver();
 
@@ -64,6 +77,7 @@ private:
 private:
     ros::NodeHandle _nh;
     ros::Publisher _vertex_pub;
+    ros::Publisher _vertexRgb_pub;
 
     // Image transportation
     image_transport::ImageTransport _imgTr;
@@ -96,6 +110,7 @@ private:
     // >>>>> Pointcloud ROS Message
     std_msgs::Header _lastPtCloudMsgHeader;
     sensor_msgs::PointCloud2 _lastPtCloud;
+    sensor_msgs::PointCloud2 _lastRGBPtCloud;
     // <<<<< Pointcloud ROS Message
 };
 
