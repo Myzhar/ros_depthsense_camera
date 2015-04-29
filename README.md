@@ -1,4 +1,4 @@
-# depthdense_camera_ros
+# ros_depthdense_camera
 ROS node to acquire RGB and 3D data from SoftKinetic DepthSense cameras
 
 ## Note by Myzhar
