@@ -8,6 +8,7 @@
 #include <std_msgs/Header.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/Imu.h>
 
 using namespace std;
 
@@ -47,7 +48,11 @@ public:
 
     void run();
 
+
+
 private:
+    void loadParams();
+
     void onDeviceAdded(DepthSense::Context context, DepthSense::Device device);
     void onDeviceRemoved(DepthSense::Context context, DepthSense::Device device);
 
@@ -77,11 +82,13 @@ private:
 private:
     ros::NodeHandle _nh;
     ros::Publisher _vertex_pub;
-    ros::Publisher _vertexRgb_pub;
+    ros::Publisher _vertex_reg_pub;
+    ros::Publisher _accel_pub;
 
-    // Image transportation
+    // >>>>> Image transportation
     image_transport::ImageTransport _imgTr;
     image_transport::CameraPublisher _rgb_pub;
+    // <<<<< Image transportation
 
     DepthSense::Context _context; ///< DepthSense context
 
@@ -94,7 +101,14 @@ private:
 
     static bool _stopping;
 
-    bool _publish_tf;
+    // >>>>> node params
+    bool _publish_tf; ///< Publish TF if true
+    bool _enable_rgb; ///< Publish RGB stream if true
+    bool _enable_ptcloud; ///< Publish 3d pointcloud if true.
+    bool _enable_registered; ///< Publish 3d registered pointcloud if true and @ref _enable_rgb is true and @ref _enable_ptcloud is true
+    bool _enable_accel; ///< Publish accelerometer data if true
+    bool _enable_auto_wb; ///< Enable RGB automatic white balance
+    // <<<<< node params
 
     // >>>>> Camera parameters
     DepthSense::IntrinsicParameters _depthIntrinsics;
@@ -111,6 +125,7 @@ private:
     std_msgs::Header _lastPtCloudMsgHeader;
     sensor_msgs::PointCloud2 _lastPtCloud;
     sensor_msgs::PointCloud2 _lastRGBPtCloud;
+    sensor_msgs::Imu _lastImuMsg;
     // <<<<< Pointcloud ROS Message
 };
 

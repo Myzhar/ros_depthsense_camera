@@ -2,6 +2,8 @@
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/distortion_models.h>
+#include <sensor_msgs/Imu.h>
+#include <ros/time.h>
 
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
@@ -27,13 +29,21 @@ DepthSenseDriver::DepthSenseDriver()
     sigAct.sa_handler = DepthSenseDriver::sighandler;
     sigaction(SIGINT, &sigAct, 0);
 
-    _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_data", 1, false);
-    _vertexRgb_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_rgb_data", 1, false);
-
-    _rgb_pub = _imgTr.advertiseCamera("rgb_image", 1, false);
+    loadParams();
 
 
-    _publish_tf = true;
+    if( _enable_ptcloud )
+        _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_data", 1, false);
+
+    if( _enable_rgb )
+        _rgb_pub = _imgTr.advertiseCamera("rgb_image", 1, false);
+
+    if( _enable_ptcloud && _enable_rgb && _enable_registered )
+        _vertex_reg_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_rgb_data", 1, false);
+
+    if( _enable_accel )
+        _accel_pub = _nh.advertise<sensor_msgs::Imu>("accelerations", 10, false );
+
 }
 
 DepthSenseDriver::~DepthSenseDriver()
@@ -159,6 +169,79 @@ void DepthSenseDriver::release()
     _initialized = false;
 }
 
+#define PAR_PUB_TF              "ds_camera/publish_tf"
+#define PAR_ENABLE_RGB          "ds_camera/enable_rgb"
+#define PAR_ENABLE_PTCLOUD      "ds_camera/enable_ptcloud"
+#define PAR_ENABLE_REGISTERED   "ds_camera/enable_ptcloud_reg"
+#define PAR_ENABLE_ACCEL        "ds_camera/enable_accel"
+#define PAR_ENABLE_AUTO_WB      "ds_camera/enable_auto_wb"
+
+void DepthSenseDriver::loadParams()
+{
+    if( _nh.hasParam( PAR_PUB_TF ) )
+    {
+        _nh.getParam( PAR_PUB_TF, _publish_tf );
+    }
+    else
+    {
+        _publish_tf = true;
+        _nh.setParam( PAR_PUB_TF, _publish_tf );
+    }
+
+    if( _nh.hasParam( PAR_ENABLE_RGB ) )
+    {
+        _nh.getParam( PAR_ENABLE_RGB, _enable_rgb );
+    }
+    else
+    {
+        _enable_rgb = true;
+        _nh.setParam( PAR_ENABLE_RGB, _enable_rgb );
+    }
+
+    if( _nh.hasParam( PAR_ENABLE_PTCLOUD ) )
+    {
+        _nh.getParam( PAR_ENABLE_PTCLOUD, _enable_ptcloud );
+    }
+    else
+    {
+        _enable_ptcloud = true;
+        _nh.setParam( PAR_ENABLE_RGB, _enable_ptcloud );
+    }
+
+    if( _nh.hasParam( PAR_ENABLE_REGISTERED ) )
+    {
+        _nh.getParam( PAR_ENABLE_REGISTERED, _enable_registered );
+    }
+    else
+    {
+        _enable_registered = true;
+        _nh.setParam( PAR_ENABLE_REGISTERED, _enable_registered );
+    }
+
+    if( _nh.hasParam( PAR_ENABLE_ACCEL ) )
+    {
+        _nh.getParam( PAR_ENABLE_ACCEL, _enable_accel );
+    }
+    else
+    {
+        _enable_accel = true;
+        _nh.setParam( PAR_ENABLE_ACCEL, _enable_accel );
+    }
+
+    if( _nh.hasParam( PAR_ENABLE_AUTO_WB ) )
+    {
+        _nh.getParam( PAR_ENABLE_AUTO_WB, _enable_auto_wb );
+    }
+    else
+    {
+        _enable_auto_wb = true;
+        _nh.setParam( PAR_ENABLE_AUTO_WB, _enable_auto_wb );
+    }
+
+
+
+}
+
 void DepthSenseDriver::run()
 {
     init();
@@ -278,7 +361,7 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
     }
 
     // >>>>> Node data enabling
-    depthNode.setEnableAccelerometer( false ); // TODO handle data
+    depthNode.setEnableAccelerometer( _enable_accel );
     depthNode.setEnableConfidenceMap( false ); // TODO handle data
     depthNode.setEnableDepthMap( false ); // TODO handle data
     depthNode.setEnableDepthMapFloatingPoint( false ); // TODO handle data
@@ -374,7 +457,7 @@ bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node 
                  DepthSense::PowerLineFrequency_toString(configurations[i].powerLineFrequency).c_str());
     }
 
-    colorNode.setEnableColorMap(true); // TODO PARAM
+    colorNode.setEnableColorMap( _enable_rgb );
     colorNode.setEnableCompressedData(false); // TODO PARAM
 
     configuration.frameFormat=DepthSense::FRAME_FORMAT_VGA;
@@ -397,7 +480,7 @@ bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node 
         
         //colorNode.setExposureAuto( DepthSense::EXPOSURE_AUTO_APERTURE_PRIORITY);
         //colorNode.setExposureAutoPriority( false );  // TODO create param
-        colorNode.setWhiteBalanceAuto( true );  // TODO create param
+        colorNode.setWhiteBalanceAuto( _enable_auto_wb );
 
         try {
             colorNode.setConfiguration(configuration);
@@ -462,19 +545,25 @@ void DepthSenseDriver::onNodeAdded(DepthSense::Device device, DepthSense::Node n
             return;
     }
 
-    if (node.is<DepthSense::DepthNode>())
+    if ( node.is<DepthSense::DepthNode>() )
     {
+        if( !_enable_ptcloud )
+            return;
+
         if( !addDepthNode( device, node, width, height, range ) )
             return;
     }
 
     if ( node.is<DepthSense::ColorNode>() )
     {
+        if( !_enable_rgb )
+            return;
+
         if( !addColorNode( device, node, width, height ) )
             return;
     }
 
-    if (node.is<DepthSense::UnsupportedNode>())
+    if ( node.is<DepthSense::UnsupportedNode>() )
     {
         return;
     }
@@ -617,15 +706,18 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         cam_info_msg.height = info->height;
         // <<<<< Camera info
 
-        _rgb_pub.publish( _lastRgbMsg, cam_info_msg );
+        if( _rgb_pub.getNumSubscribers()>0 )
+        {
+            _rgb_pub.publish( _lastRgbMsg, cam_info_msg );
+        }
 
-        if(_publish_tf)
+        if( _publish_tf )
         {
             static tf::TransformBroadcaster br;
             tf::Transform transform;
             transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
             tf::Quaternion q;
-            q.setRPY(-90.0*DEG2RAD, 0.0*DEG2RAD, -90.0*DEG2RAD);
+            q.setRPY(-90.0*DEG2RAD, 0.0*DEG2RAD, -90.0*DEG2RAD); // TODO use accelerometer?
             transform.setRotation(q);
             br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
         }
@@ -660,17 +752,57 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
 
     // ROS_INFO_STREAM( "Received depth frame #" << info->sampleCount );
 
-    //const DepthSense::FPVertex* floatVertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
-    //const DepthSense::UV* uv = (const DepthSense::UV*) data.uvMap;
-    //const DepthSense::DepthNode::Acceleration acceleration = data.acceleration;
+    ros::Time now = ros::Time::now();
+
+    double accX = 0.0;
+    double accY = 0.0;
+    double accZ = 0.0;
+
+    // >>>>> Accelerometer data
+    if( _enable_accel )
+    {
+        const DepthSense::DepthNode::Acceleration accel = data.acceleration;
+
+        _lastImuMsg.header.stamp = now;
+        _lastImuMsg.header.seq = info->totalSampleCount;
+        _lastImuMsg.header.frame_id = "depth_frame";
+
+        _lastImuMsg.angular_velocity.x = 0.0;
+        _lastImuMsg.angular_velocity.y = 0.0;
+        _lastImuMsg.angular_velocity.z = 0.0;
+        _lastImuMsg.angular_velocity_covariance.assign( -1.0 ); // Indicates that the angular velocity is not available
+
+        _lastImuMsg.orientation.x = 0.0;
+        _lastImuMsg.orientation.y = 0.0;
+        _lastImuMsg.orientation.z = 0.0;
+        _lastImuMsg.orientation.w = 0.0;
+        _lastImuMsg.orientation_covariance.assign( -1.0 ); // Indicates that the orientation is not available
+
+        _lastImuMsg.linear_acceleration.x = (double)accel.x;
+        _lastImuMsg.linear_acceleration.y = (double)accel.y;
+        _lastImuMsg.linear_acceleration.z = (double)accel.z;
+        _lastImuMsg.linear_acceleration_covariance.assign( 0.0 );
+
+        accX = _lastImuMsg.linear_acceleration.x;
+        accY = _lastImuMsg.linear_acceleration.y;
+        accZ = _lastImuMsg.linear_acceleration.z;
+
+        _accel_pub.publish( _lastImuMsg );
+
+    }
+    // <<<<< Accelerometer data
 
     // >>>>> float Point Clouds (data in m)
+
+    if( !_enable_ptcloud )
+        return;
+
     const DepthSense::FPVertex* fp_vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
     if( fp_vertex!=NULL && _vertex_pub.getNumSubscribers()>0 )
     {
         //prep a consistent header
 
-        _lastPtCloudMsgHeader.stamp = ros::Time::now();
+        _lastPtCloudMsgHeader.stamp = now;
         _lastPtCloudMsgHeader.seq = info->totalSampleCount;
         _lastPtCloudMsgHeader.frame_id = "depth_frame";
 
@@ -711,110 +843,118 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
     // <<<<< float Point Cloud (data in m)
 
     // >>>>> RGB Point Cloud (data in m)
-    const DepthSense::UV* uv_map = (const DepthSense::UV*) data.uvMap;
-
-    if( uv_map!=NULL && _vertexRgb_pub.getNumSubscribers()>0 )
+    if( _enable_registered && _enable_rgb  )
     {
-        //prep a consistent header
+        const DepthSense::UV* uv_map = (const DepthSense::UV*) data.uvMap;
 
-        _lastPtCloudMsgHeader.stamp = ros::Time::now();
-        _lastPtCloudMsgHeader.seq = info->totalSampleCount;
-        _lastPtCloudMsgHeader.frame_id = "depth_frame";
-
-        _lastRGBPtCloud.header = _lastPtCloudMsgHeader;
-
-        int ptsCount = info->width * info->height;
-
-        _lastRGBPtCloud.fields.resize(4);
-        _lastRGBPtCloud.fields[0].name = "z";
-        _lastRGBPtCloud.fields[0].offset = 0;
-        _lastRGBPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastRGBPtCloud.fields[0].count = 1;
-        _lastRGBPtCloud.fields[1].name = "y";
-        _lastRGBPtCloud.fields[1].offset = sizeof(float);
-        _lastRGBPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastRGBPtCloud.fields[1].count = 1;
-        _lastRGBPtCloud.fields[2].name = "x";
-        _lastRGBPtCloud.fields[2].offset = 2*sizeof(float);
-        _lastRGBPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastRGBPtCloud.fields[2].count = 1;
-        _lastRGBPtCloud.fields[3].name = "rgb";
-        _lastRGBPtCloud.fields[3].offset = 3*sizeof(float);
-        _lastRGBPtCloud.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastRGBPtCloud.fields[3].count = 1;
-
-        _lastRGBPtCloud.width = info->width;
-        _lastRGBPtCloud.height = info->height;
-        _lastRGBPtCloud.is_dense = true;
-        _lastRGBPtCloud.is_bigendian = false;
-        _lastRGBPtCloud.point_step = 4*sizeof(float);
-        _lastRGBPtCloud.row_step = _lastRGBPtCloud.point_step * _lastRGBPtCloud.width;
-
-        int cloudSize = ptsCount * _lastRGBPtCloud.point_step;
-        _lastRGBPtCloud.data.resize( cloudSize );
-
-        float* ptCloudPtr = (float*)(&_lastRGBPtCloud.data[0]);
-
-        uint8_t* rgbData = (uint8_t*)(&_lastRgbMsg.data[0]);
-
-        for( int r=0; r<info->height; r++ )
+        if( uv_map!=NULL && _vertex_reg_pub.getNumSubscribers()>0 )
         {
-            for( int c=0; c<info->width; c++ )
+            //prep a consistent header
+
+            _lastPtCloudMsgHeader.stamp = ros::Time::now();
+            _lastPtCloudMsgHeader.seq = info->totalSampleCount;
+            _lastPtCloudMsgHeader.frame_id = "depth_frame";
+
+            _lastRGBPtCloud.header = _lastPtCloudMsgHeader;
+
+            int ptsCount = info->width * info->height;
+
+            _lastRGBPtCloud.fields.resize(4);
+            _lastRGBPtCloud.fields[0].name = "z";
+            _lastRGBPtCloud.fields[0].offset = 0;
+            _lastRGBPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastRGBPtCloud.fields[0].count = 1;
+            _lastRGBPtCloud.fields[1].name = "y";
+            _lastRGBPtCloud.fields[1].offset = sizeof(float);
+            _lastRGBPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastRGBPtCloud.fields[1].count = 1;
+            _lastRGBPtCloud.fields[2].name = "x";
+            _lastRGBPtCloud.fields[2].offset = 2*sizeof(float);
+            _lastRGBPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastRGBPtCloud.fields[2].count = 1;
+            _lastRGBPtCloud.fields[3].name = "rgb";
+            _lastRGBPtCloud.fields[3].offset = 3*sizeof(float);
+            _lastRGBPtCloud.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastRGBPtCloud.fields[3].count = 1;
+
+            _lastRGBPtCloud.width = info->width;
+            _lastRGBPtCloud.height = info->height;
+            _lastRGBPtCloud.is_dense = true;
+            _lastRGBPtCloud.is_bigendian = false;
+            _lastRGBPtCloud.point_step = 4*sizeof(float);
+            _lastRGBPtCloud.row_step = _lastRGBPtCloud.point_step * _lastRGBPtCloud.width;
+
+            int cloudSize = ptsCount * _lastRGBPtCloud.point_step;
+            _lastRGBPtCloud.data.resize( cloudSize );
+
+            float* ptCloudPtr = (float*)(&_lastRGBPtCloud.data[0]);
+
+            uint8_t* rgbData = (uint8_t*)(&_lastRgbMsg.data[0]);
+
+            for( int r=0; r<info->height; r++ )
             {
-                int uvIdx = c + r*info->width;
-                float f_u = uv_map[uvIdx].u;
-                float f_v = uv_map[uvIdx].v;
-
-                int idx = c*4+r*info->width*4;
-                int vertIdx = c+r*info->width;
-
-                if( f_u != -FLT_MAX && f_v != -FLT_MAX )
+                for( int c=0; c<info->width; c++ )
                 {
-                    ptCloudPtr[idx + 0] = fp_vertex[vertIdx].x; // Z
-                    ptCloudPtr[idx + 1] = fp_vertex[vertIdx].y; // Y
-                    ptCloudPtr[idx + 2] = fp_vertex[vertIdx].z; // X
+                    int uvIdx = c + r*info->width;
+                    float f_u = uv_map[uvIdx].u;
+                    float f_v = uv_map[uvIdx].v;
 
-                    RGBA px;
-                    px.val = 0;
+                    int idx = c*4+r*info->width*4;
+                    int vertIdx = c+r*info->width;
 
-                    int u = (int)(f_u*(float)_lastRgbMsg.width);
-                    int v = (int)(f_v*(float)_lastRgbMsg.height);
-
-                    if( u<_lastRgbMsg.width && v<_lastRgbMsg.height )
+                    if( f_u != -FLT_MAX && f_v != -FLT_MAX )
                     {
-                        int idxRgb = u*3+v*_lastRgbMsg.width*3;
-                        px.color.b = rgbData[idxRgb + 0];
-                        px.color.g = rgbData[idxRgb + 1];
-                        px.color.r = rgbData[idxRgb + 2];
-                        px.color.a = 255; // not really used
-                    }
+                        ptCloudPtr[idx + 0] = fp_vertex[vertIdx].x; // Z
+                        ptCloudPtr[idx + 1] = fp_vertex[vertIdx].y; // Y
+                        ptCloudPtr[idx + 2] = fp_vertex[vertIdx].z; // X
 
-                    //ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGBA
-                    ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGB
-                }
-                else
-                {
-                    ptCloudPtr[idx + 0] = -2.0f; // Z
-                    ptCloudPtr[idx + 1] = -2.0f; // Y
-                    ptCloudPtr[idx + 2] = -2.0f; // X
-                    ptCloudPtr[idx + 3] = 0;
+                        RGBA px;
+                        px.val = 0;
+
+                        int u = (int)(f_u*(float)_lastRgbMsg.width);
+                        int v = (int)(f_v*(float)_lastRgbMsg.height);
+
+                        if( u<_lastRgbMsg.width && v<_lastRgbMsg.height )
+                        {
+                            int idxRgb = u*3+v*_lastRgbMsg.width*3;
+                            px.color.b = rgbData[idxRgb + 0];
+                            px.color.g = rgbData[idxRgb + 1];
+                            px.color.r = rgbData[idxRgb + 2];
+                            px.color.a = 255; // not really used
+                        }
+
+                        //ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGBA
+                        ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGB
+                    }
+                    else
+                    {
+                        ptCloudPtr[idx + 0] = -2.0f; // Z
+                        ptCloudPtr[idx + 1] = -2.0f; // Y
+                        ptCloudPtr[idx + 2] = -2.0f; // X
+                        ptCloudPtr[idx + 3] = 0;
+                    }
                 }
             }
-        }
 
-        _vertexRgb_pub.publish( _lastRGBPtCloud );
+            _vertex_reg_pub.publish( _lastRGBPtCloud );
+        }
     }
     // <<<<< RGB Point Cloud (data in m)
 
     if(_publish_tf)
     {
+        double roll  = atan2(-accX,-accY);
+        double pitch = atan2( accZ,-accY);
+
+        ROS_INFO_STREAM( "Roll: " << roll*RAD2DEG << "° - Pitch: " << pitch*RAD2DEG << "°" );
+
         static tf::TransformBroadcaster br;
         tf::Transform transform;
         transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
         tf::Quaternion q;
-        q.setRPY(90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
+        q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
         transform.setRotation(q);
-        br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );
+        br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );        
     }
 
 }
