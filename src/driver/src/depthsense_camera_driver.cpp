@@ -348,12 +348,12 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
 
     DepthSense::DepthNode::Configuration configuration = depthNode.getConfiguration();
 
-    ROS_INFO_STREAM(" Available configurations:");
+    ROS_DEBUG_STREAM(" Available configurations:");
     std::vector<DepthSense::DepthNode::Configuration> configurations = depthNode.getConfigurations();
 
     for(unsigned int i = 0; i < configurations.size(); i++)
     {
-        ROS_INFO("    %s - %d fps - %s - saturation %s",
+        ROS_DEBUG("    %s - %d fps - %s - saturation %s",
                  DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
                  configurations[i].framerate,
                  DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
@@ -447,11 +447,11 @@ bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node 
 
     DepthSense::ColorNode::Configuration configuration = colorNode.getConfiguration();
 
-    ROS_INFO(" Available configurations:");
+    ROS_DEBUG_STREAM(" Available configurations:");
     std::vector<DepthSense::ColorNode::Configuration> configurations = colorNode.getConfigurations();
     for (unsigned int i = 0; i < configurations.size(); i++)
     {
-        ROS_INFO("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
+        ROS_DEBUG("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
                  configurations[i].framerate,
                  DepthSense::CompressionType_toString(configurations[i].compression).c_str(),
                  DepthSense::PowerLineFrequency_toString(configurations[i].powerLineFrequency).c_str());
@@ -717,7 +717,16 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
             tf::Transform transform;
             transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
             tf::Quaternion q;
-            q.setRPY(-90.0*DEG2RAD, 0.0*DEG2RAD, -90.0*DEG2RAD); // TODO use accelerometer?
+
+            if(_enable_accel)
+            {
+                double roll = _lastImuMsg.orientation.x;
+                double pitch = _lastImuMsg.orientation.y;
+                q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
+            }
+            else
+                q.setRPY( 90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
+
             transform.setRotation(q);
             br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
         }
@@ -763,6 +772,13 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
     {
         const DepthSense::DepthNode::Acceleration accel = data.acceleration;
 
+        accX = (double)accel.x;
+        accY = (double)accel.y;
+        accZ = (double)accel.z;
+
+        double roll  = atan2( -accX, sqrt( accY*accY+accZ*accZ ) );
+        double pitch = atan2( -accZ, sqrt( accX*accX+accY*accY ) );
+
         _lastImuMsg.header.stamp = now;
         _lastImuMsg.header.seq = info->totalSampleCount;
         _lastImuMsg.header.frame_id = "depth_frame";
@@ -772,20 +788,18 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
         _lastImuMsg.angular_velocity.z = 0.0;
         _lastImuMsg.angular_velocity_covariance.assign( -1.0 ); // Indicates that the angular velocity is not available
 
-        _lastImuMsg.orientation.x = 0.0;
-        _lastImuMsg.orientation.y = 0.0;
+        _lastImuMsg.orientation.x = roll;
+        _lastImuMsg.orientation.y = pitch;
         _lastImuMsg.orientation.z = 0.0;
         _lastImuMsg.orientation.w = 0.0;
-        _lastImuMsg.orientation_covariance.assign( -1.0 ); // Indicates that the orientation is not available
+        _lastImuMsg.orientation_covariance.assign( 0.0 ); // Indicates that the orientation is not available
 
-        _lastImuMsg.linear_acceleration.x = (double)accel.x;
-        _lastImuMsg.linear_acceleration.y = (double)accel.y;
-        _lastImuMsg.linear_acceleration.z = (double)accel.z;
+        _lastImuMsg.linear_acceleration.x = accX;
+        _lastImuMsg.linear_acceleration.y = accY;
+        _lastImuMsg.linear_acceleration.z = accZ;
         _lastImuMsg.linear_acceleration_covariance.assign( 0.0 );
 
-        accX = _lastImuMsg.linear_acceleration.x;
-        accY = _lastImuMsg.linear_acceleration.y;
-        accZ = _lastImuMsg.linear_acceleration.z;
+
 
         _accel_pub.publish( _lastImuMsg );
 
@@ -943,18 +957,26 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
 
     if(_publish_tf)
     {
-        double roll  = atan2(-accX,-accY);
-        double pitch = atan2( accZ,-accY);
 
-        ROS_INFO_STREAM( "Roll: " << roll*RAD2DEG << "° - Pitch: " << pitch*RAD2DEG << "°" );
+        //ROS_INFO_STREAM( "accX: " << accX << "g - accY: " << accY << "g - accZ: " << accZ << "g" );
+        //ROS_INFO_STREAM( "Roll: " << roll*RAD2DEG << " deg - Pitch: " << pitch*RAD2DEG << " deg" );
 
         static tf::TransformBroadcaster br;
         tf::Transform transform;
         transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
         tf::Quaternion q;
-        q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
+
+        if(_enable_accel)
+        {
+            double roll = _lastImuMsg.orientation.x;
+            double pitch = _lastImuMsg.orientation.y;
+            q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
+        }
+        else
+            q.setRPY( 90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
+
         transform.setRotation(q);
-        br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "depth_frame") );        
+        br.sendTransform( tf::StampedTransform(transform, now, "world", "depth_frame") );
     }
 
 }
