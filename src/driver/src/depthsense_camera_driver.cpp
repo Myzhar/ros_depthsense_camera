@@ -354,10 +354,10 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
     for(unsigned int i = 0; i < configurations.size(); i++)
     {
         ROS_DEBUG("    %s - %d fps - %s - saturation %s",
-                 DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
-                 configurations[i].framerate,
-                 DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
-                 configurations[i].saturation ? "enabled" : "disabled");
+                  DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
+                  configurations[i].framerate,
+                  DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
+                  configurations[i].saturation ? "enabled" : "disabled");
     }
 
     // >>>>> Node data enabling
@@ -452,9 +452,9 @@ bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node 
     for (unsigned int i = 0; i < configurations.size(); i++)
     {
         ROS_DEBUG("    %s - %d fps - %s - %s", DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
-                 configurations[i].framerate,
-                 DepthSense::CompressionType_toString(configurations[i].compression).c_str(),
-                 DepthSense::PowerLineFrequency_toString(configurations[i].powerLineFrequency).c_str());
+                  configurations[i].framerate,
+                  DepthSense::CompressionType_toString(configurations[i].compression).c_str(),
+                  DepthSense::PowerLineFrequency_toString(configurations[i].powerLineFrequency).c_str());
     }
 
     colorNode.setEnableColorMap( _enable_rgb );
@@ -715,20 +715,24 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         {
             static tf::TransformBroadcaster br;
             tf::Transform transform;
-            transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
-            tf::Quaternion q;
 
-            if(_enable_accel)
-            {
-                double roll = _lastImuMsg.orientation.x;
-                double pitch = _lastImuMsg.orientation.y;
-                q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
-            }
+            if( _enable_ptcloud )
+                transform.setOrigin( tf::Vector3(0.0, 0.0, -0.026) );
+            else
+                transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
+
+
+            tf::Quaternion q;
+            if( _enable_ptcloud )
+                q.setRPY( 0.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
             else
                 q.setRPY( 90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
-
             transform.setRotation(q);
-            br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
+
+            if( _enable_ptcloud )
+                br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "depth_frame", "rgb_frame") );
+            else
+                br.sendTransform( tf::StampedTransform(transform, ros::Time::now(), "world", "rgb_frame") );
         }
     }
     // <<<<< RGB frame
