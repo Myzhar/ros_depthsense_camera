@@ -86,14 +86,14 @@ private:
     ros::Publisher _accel_pub;
 
     // >>>>> Image transportation RGB
-    image_transport::ImageTransport rgb_ImgTr;
+    image_transport::ImageTransport _rgb_ImgTr;
     image_transport::CameraPublisher _rgb_pub;
     // <<<<< Image transportation RGB
 
     // >>>>> Image transportation Depth/Confidence
-    image_transport::ImageTransport depth_ImgTr;
+    image_transport::ImageTransport _depth_ImgTr;
     image_transport::CameraPublisher _depth_pub;
-    image_transport::ImageTransport confidence_ImgTr;
+    image_transport::ImageTransport _confidence_ImgTr;
     image_transport::CameraPublisher _confidence_pub;
     // <<<<< Image transportation Depth/Confidence
 

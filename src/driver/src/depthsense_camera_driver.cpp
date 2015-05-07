@@ -22,9 +22,9 @@ DepthSenseDriver::DepthSenseDriver()
     : _initialized(false)
     , _streaming(false)
     , _error(false)
-    , rgb_ImgTr(_nh)
-    , depth_ImgTr(_nh)
-    , confidence_ImgTr(_nh)
+    , _rgb_ImgTr(_nh)
+    , _depth_ImgTr(_nh)
+    , _confidence_ImgTr(_nh)
 {
     struct sigaction sigAct;
     memset( &sigAct, 0, sizeof(sigAct) );
@@ -38,12 +38,12 @@ DepthSenseDriver::DepthSenseDriver()
         _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_data", 1, false);
 
     if( _enable_rgb )
-        _rgb_pub = rgb_ImgTr.advertiseCamera("rgb_image", 1, false);
+        _rgb_pub = _rgb_ImgTr.advertiseCamera("rgb_image", 1, false);
 
     if( _enable_depth_confidence )
     {
-        _depth_pub = depth_ImgTr.advertiseCamera("depth_image", 1,false);
-        _confidence_pub = confidence_ImgTr.advertiseCamera("confidence_image", 1, false);
+        _depth_pub = _depth_ImgTr.advertiseCamera("depth_image", 1,false);
+        _confidence_pub = _confidence_ImgTr.advertiseCamera("confidence_image", 1, false);
     }
 
     if( _enable_ptcloud && _enable_rgb && _enable_registered )
@@ -177,12 +177,12 @@ void DepthSenseDriver::release()
     _initialized = false;
 }
 
-#define PAR_PUB_TF              "ds_camera/publish_tf"
-#define PAR_ENABLE_RGB          "ds_camera/enable_rgb"
-#define PAR_ENABLE_PTCLOUD      "ds_camera/enable_ptcloud"
-#define PAR_ENABLE_REGISTERED   "ds_camera/enable_ptcloud_reg"
-#define PAR_ENABLE_ACCEL        "ds_camera/enable_accel"
-#define PAR_ENABLE_AUTO_WB      "ds_camera/enable_auto_wb"
+#define PAR_PUB_TF                  "ds_camera/publish_tf"
+#define PAR_ENABLE_RGB              "ds_camera/enable_rgb"
+#define PAR_ENABLE_PTCLOUD          "ds_camera/enable_ptcloud"
+#define PAR_ENABLE_REGISTERED       "ds_camera/enable_ptcloud_reg"
+#define PAR_ENABLE_ACCEL            "ds_camera/enable_accel"
+#define PAR_ENABLE_AUTO_WB          "ds_camera/enable_auto_wb"
 #define PAR_ENABLE_DEPTH_CONFIDENCE "ds_camera/enable_depth_confidence"
 
 void DepthSenseDriver::loadParams()
@@ -256,7 +256,6 @@ void DepthSenseDriver::loadParams()
         _enable_depth_confidence = true;
         _nh.setParam( PAR_ENABLE_DEPTH_CONFIDENCE, _enable_depth_confidence );
     }
-
 }
 
 void DepthSenseDriver::run()
