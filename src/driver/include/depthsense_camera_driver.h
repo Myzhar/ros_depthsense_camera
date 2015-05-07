@@ -85,10 +85,17 @@ private:
     ros::Publisher _vertex_reg_pub;
     ros::Publisher _accel_pub;
 
-    // >>>>> Image transportation
-    image_transport::ImageTransport _imgTr;
+    // >>>>> Image transportation RGB
+    image_transport::ImageTransport rgb_ImgTr;
     image_transport::CameraPublisher _rgb_pub;
-    // <<<<< Image transportation
+    // <<<<< Image transportation RGB
+
+    // >>>>> Image transportation Depth/Confidence
+    image_transport::ImageTransport depth_ImgTr;
+    image_transport::CameraPublisher _depth_pub;
+    image_transport::ImageTransport confidence_ImgTr;
+    image_transport::CameraPublisher _confidence_pub;
+    // <<<<< Image transportation Depth/Confidence
 
     DepthSense::Context _context; ///< DepthSense context
 
@@ -104,6 +111,7 @@ private:
     // >>>>> node params
     bool _publish_tf; ///< Publish TF if true
     bool _enable_rgb; ///< Publish RGB stream if true
+    bool _enable_depth_confidence; ///< Publish Depth and Confidence stream if true
     bool _enable_ptcloud; ///< Publish 3d pointcloud if true.
     bool _enable_registered; ///< Publish 3d registered pointcloud if true and @ref _enable_rgb is true and @ref _enable_ptcloud is true
     bool _enable_accel; ///< Publish accelerometer data if true

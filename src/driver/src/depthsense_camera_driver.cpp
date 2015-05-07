@@ -22,7 +22,9 @@ DepthSenseDriver::DepthSenseDriver()
     : _initialized(false)
     , _streaming(false)
     , _error(false)
-    , _imgTr(_nh)
+    , rgb_ImgTr(_nh)
+    , depth_ImgTr(_nh)
+    , confidence_ImgTr(_nh)
 {
     struct sigaction sigAct;
     memset( &sigAct, 0, sizeof(sigAct) );
@@ -36,7 +38,13 @@ DepthSenseDriver::DepthSenseDriver()
         _vertex_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_data", 1, false);
 
     if( _enable_rgb )
-        _rgb_pub = _imgTr.advertiseCamera("rgb_image", 1, false);
+        _rgb_pub = rgb_ImgTr.advertiseCamera("rgb_image", 1, false);
+
+    if( _enable_depth_confidence )
+    {
+        _depth_pub = depth_ImgTr.advertiseCamera("depth_image", 1,false);
+        _confidence_pub = confidence_ImgTr.advertiseCamera("confidence_image", 1, false);
+    }
 
     if( _enable_ptcloud && _enable_rgb && _enable_registered )
         _vertex_reg_pub = _nh.advertise<sensor_msgs::PointCloud2>("vertex_rgb_data", 1, false);
@@ -175,6 +183,7 @@ void DepthSenseDriver::release()
 #define PAR_ENABLE_REGISTERED   "ds_camera/enable_ptcloud_reg"
 #define PAR_ENABLE_ACCEL        "ds_camera/enable_accel"
 #define PAR_ENABLE_AUTO_WB      "ds_camera/enable_auto_wb"
+#define PAR_ENABLE_DEPTH_CONFIDENCE "ds_camera/enable_depth_confidence"
 
 void DepthSenseDriver::loadParams()
 {
@@ -238,7 +247,15 @@ void DepthSenseDriver::loadParams()
         _nh.setParam( PAR_ENABLE_AUTO_WB, _enable_auto_wb );
     }
 
-
+    if( _nh.hasParam( PAR_ENABLE_DEPTH_CONFIDENCE ) )
+    {
+        _nh.getParam( PAR_ENABLE_DEPTH_CONFIDENCE, _enable_depth_confidence );
+    }
+    else
+    {
+        _enable_depth_confidence = true;
+        _nh.setParam( PAR_ENABLE_DEPTH_CONFIDENCE, _enable_depth_confidence );
+    }
 
 }
 
@@ -362,8 +379,8 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
 
     // >>>>> Node data enabling
     depthNode.setEnableAccelerometer( _enable_accel );
-    depthNode.setEnableConfidenceMap( false ); // TODO handle data
-    depthNode.setEnableDepthMap( false ); // TODO handle data
+    depthNode.setEnableConfidenceMap( _enable_depth_confidence ); // TODO handle data
+    depthNode.setEnableDepthMap( _enable_depth_confidence ); // TODO handle data
     depthNode.setEnableDepthMapFloatingPoint( false ); // TODO handle data
     depthNode.setEnablePhaseMap( false ); // TODO handle data
     depthNode.setEnableUvMap( true ); // TODO handle data
@@ -812,163 +829,224 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
 
     // >>>>> float Point Clouds (data in m)
 
-    if( !_enable_ptcloud )
-        return;
-
-    const DepthSense::FPVertex* fp_vertex = (const DepthSense::FPVertex*) data.verticesFloatingPoint;
-    if( fp_vertex!=NULL && _vertex_pub.getNumSubscribers()>0 )
+    if( _enable_ptcloud )
     {
-        //prep a consistent header
-
-        _lastPtCloudMsgHeader.stamp = now;
-        _lastPtCloudMsgHeader.seq = info->totalSampleCount;
-        _lastPtCloudMsgHeader.frame_id = "depth_frame";
-
-        _lastPtCloud.header = _lastPtCloudMsgHeader;
-
-        int ptsCount = info->width * info->height;
-
-        _lastPtCloud.fields.resize(3);
-        _lastPtCloud.fields[0].name = "z";
-        _lastPtCloud.fields[0].offset = 0;
-        _lastPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastPtCloud.fields[0].count = 1;
-        _lastPtCloud.fields[1].name = "y";
-        _lastPtCloud.fields[1].offset = sizeof(float);
-        _lastPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastPtCloud.fields[1].count = 1;
-        _lastPtCloud.fields[2].name = "x";
-        _lastPtCloud.fields[2].offset = 2*sizeof(float);
-        _lastPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
-        _lastPtCloud.fields[2].count = 1;
-
-        _lastPtCloud.width = info->width;
-        _lastPtCloud.height = info->height;
-        _lastPtCloud.is_dense = true;
-        _lastPtCloud.is_bigendian = false;
-        _lastPtCloud.point_step = 3 * sizeof(float);
-        _lastPtCloud.row_step = _lastPtCloud.point_step * _lastPtCloud.width ;
-
-        int cloudSize = ptsCount * _lastPtCloud.point_step;
-        _lastPtCloud.data.resize( cloudSize );
-
-        memcpy( (uint8_t*)(&_lastPtCloud.data[0]), (uint8_t*)(&fp_vertex[0]), cloudSize );
-
-        _vertex_pub.publish( _lastPtCloud );
-
-        // TODO send 2d virtual laser scan message
-    }
-    // <<<<< float Point Cloud (data in m)
-
-    // >>>>> RGB Point Cloud (data in m)
-    if( _enable_registered && _enable_rgb  )
-    {
-        const DepthSense::UV* uv_map = (const DepthSense::UV*) data.uvMap;
-
-        if( uv_map!=NULL && _vertex_reg_pub.getNumSubscribers()>0 )
-        {
+        const DepthSense::FPVertex *fp_vertex = (const DepthSense::FPVertex *) data.verticesFloatingPoint;
+        if (fp_vertex != NULL && _vertex_pub.getNumSubscribers() > 0) {
             //prep a consistent header
 
-            _lastPtCloudMsgHeader.stamp = ros::Time::now();
+            _lastPtCloudMsgHeader.stamp = now;
             _lastPtCloudMsgHeader.seq = info->totalSampleCount;
             _lastPtCloudMsgHeader.frame_id = "depth_frame";
 
-            _lastRGBPtCloud.header = _lastPtCloudMsgHeader;
+            _lastPtCloud.header = _lastPtCloudMsgHeader;
 
             int ptsCount = info->width * info->height;
 
-            _lastRGBPtCloud.fields.resize(4);
-            _lastRGBPtCloud.fields[0].name = "z";
-            _lastRGBPtCloud.fields[0].offset = 0;
-            _lastRGBPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
-            _lastRGBPtCloud.fields[0].count = 1;
-            _lastRGBPtCloud.fields[1].name = "y";
-            _lastRGBPtCloud.fields[1].offset = sizeof(float);
-            _lastRGBPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
-            _lastRGBPtCloud.fields[1].count = 1;
-            _lastRGBPtCloud.fields[2].name = "x";
-            _lastRGBPtCloud.fields[2].offset = 2*sizeof(float);
-            _lastRGBPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
-            _lastRGBPtCloud.fields[2].count = 1;
-            _lastRGBPtCloud.fields[3].name = "rgb";
-            _lastRGBPtCloud.fields[3].offset = 3*sizeof(float);
-            _lastRGBPtCloud.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
-            _lastRGBPtCloud.fields[3].count = 1;
+            _lastPtCloud.fields.resize(3);
+            _lastPtCloud.fields[0].name = "z";
+            _lastPtCloud.fields[0].offset = 0;
+            _lastPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastPtCloud.fields[0].count = 1;
+            _lastPtCloud.fields[1].name = "y";
+            _lastPtCloud.fields[1].offset = sizeof(float);
+            _lastPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastPtCloud.fields[1].count = 1;
+            _lastPtCloud.fields[2].name = "x";
+            _lastPtCloud.fields[2].offset = 2 * sizeof(float);
+            _lastPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+            _lastPtCloud.fields[2].count = 1;
 
-            _lastRGBPtCloud.width = info->width;
-            _lastRGBPtCloud.height = info->height;
-            _lastRGBPtCloud.is_dense = true;
-            _lastRGBPtCloud.is_bigendian = false;
-            _lastRGBPtCloud.point_step = 4*sizeof(float);
-            _lastRGBPtCloud.row_step = _lastRGBPtCloud.point_step * _lastRGBPtCloud.width;
+            _lastPtCloud.width = info->width;
+            _lastPtCloud.height = info->height;
+            _lastPtCloud.is_dense = true;
+            _lastPtCloud.is_bigendian = false;
+            _lastPtCloud.point_step = 3 * sizeof(float);
+            _lastPtCloud.row_step = _lastPtCloud.point_step * _lastPtCloud.width;
 
-            int cloudSize = ptsCount * _lastRGBPtCloud.point_step;
-            _lastRGBPtCloud.data.resize( cloudSize );
+            int cloudSize = ptsCount * _lastPtCloud.point_step;
+            _lastPtCloud.data.resize(cloudSize);
 
-            float* ptCloudPtr = (float*)(&_lastRGBPtCloud.data[0]);
+            memcpy((uint8_t *) (&_lastPtCloud.data[0]), (uint8_t *) (&fp_vertex[0]), cloudSize);
 
-            uint8_t* rgbData = (uint8_t*)(&_lastRgbMsg.data[0]);
+            _vertex_pub.publish(_lastPtCloud);
 
-            for( int r=0; r<info->height; r++ )
-            {
-                for( int c=0; c<info->width; c++ )
-                {
-                    int uvIdx = c + r*info->width;
-                    float f_u = uv_map[uvIdx].u;
-                    float f_v = uv_map[uvIdx].v;
+            // TODO send 2d virtual laser scan message
+        }
+        // <<<<< float Point Cloud (data in m)
 
-                    int idx = c*4+r*info->width*4;
-                    int vertIdx = c+r*info->width;
+        // >>>>> RGB Point Cloud (data in m)
+        if (_enable_registered && _enable_rgb) {
+            const DepthSense::UV *uv_map = (const DepthSense::UV *) data.uvMap;
 
-                    if( f_u != -FLT_MAX && f_v != -FLT_MAX )
-                    {
-                        ptCloudPtr[idx + 0] = fp_vertex[vertIdx].x; // Z
-                        ptCloudPtr[idx + 1] = fp_vertex[vertIdx].y; // Y
-                        ptCloudPtr[idx + 2] = fp_vertex[vertIdx].z; // X
+            if (uv_map != NULL && _vertex_reg_pub.getNumSubscribers() > 0) {
+                //prep a consistent header
 
-                        RGBA px;
-                        px.val = 0;
+                _lastPtCloudMsgHeader.stamp = ros::Time::now();
+                _lastPtCloudMsgHeader.seq = info->totalSampleCount;
+                _lastPtCloudMsgHeader.frame_id = "depth_frame";
 
-                        int u = (int)(f_u*(float)_lastRgbMsg.width);
-                        int v = (int)(f_v*(float)_lastRgbMsg.height);
+                _lastRGBPtCloud.header = _lastPtCloudMsgHeader;
 
-                        if( u<_lastRgbMsg.width && v<_lastRgbMsg.height )
-                        {
-                            int idxRgb = u*3+v*_lastRgbMsg.width*3;
-                            px.color.b = rgbData[idxRgb + 0];
-                            px.color.g = rgbData[idxRgb + 1];
-                            px.color.r = rgbData[idxRgb + 2];
-                            px.color.a = 255; // not really used
+                int ptsCount = info->width * info->height;
+
+                _lastRGBPtCloud.fields.resize(4);
+                _lastRGBPtCloud.fields[0].name = "z";
+                _lastRGBPtCloud.fields[0].offset = 0;
+                _lastRGBPtCloud.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+                _lastRGBPtCloud.fields[0].count = 1;
+                _lastRGBPtCloud.fields[1].name = "y";
+                _lastRGBPtCloud.fields[1].offset = sizeof(float);
+                _lastRGBPtCloud.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+                _lastRGBPtCloud.fields[1].count = 1;
+                _lastRGBPtCloud.fields[2].name = "x";
+                _lastRGBPtCloud.fields[2].offset = 2 * sizeof(float);
+                _lastRGBPtCloud.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+                _lastRGBPtCloud.fields[2].count = 1;
+                _lastRGBPtCloud.fields[3].name = "rgb";
+                _lastRGBPtCloud.fields[3].offset = 3 * sizeof(float);
+                _lastRGBPtCloud.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
+                _lastRGBPtCloud.fields[3].count = 1;
+
+                _lastRGBPtCloud.width = info->width;
+                _lastRGBPtCloud.height = info->height;
+                _lastRGBPtCloud.is_dense = true;
+                _lastRGBPtCloud.is_bigendian = false;
+                _lastRGBPtCloud.point_step = 4 * sizeof(float);
+                _lastRGBPtCloud.row_step = _lastRGBPtCloud.point_step * _lastRGBPtCloud.width;
+
+                int cloudSize = ptsCount * _lastRGBPtCloud.point_step;
+                _lastRGBPtCloud.data.resize(cloudSize);
+
+                float *ptCloudPtr = (float *) (&_lastRGBPtCloud.data[0]);
+
+                uint8_t *rgbData = (uint8_t *) (&_lastRgbMsg.data[0]);
+
+                for (int r = 0; r < info->height; r++) {
+                    for (int c = 0; c < info->width; c++) {
+                        int uvIdx = c + r * info->width;
+                        float f_u = uv_map[uvIdx].u;
+                        float f_v = uv_map[uvIdx].v;
+
+                        int idx = c * 4 + r * info->width * 4;
+                        int vertIdx = c + r * info->width;
+
+                        if (f_u != -FLT_MAX && f_v != -FLT_MAX) {
+                            ptCloudPtr[idx + 0] = fp_vertex[vertIdx].x; // Z
+                            ptCloudPtr[idx + 1] = fp_vertex[vertIdx].y; // Y
+                            ptCloudPtr[idx + 2] = fp_vertex[vertIdx].z; // X
+
+                            RGBA px;
+                            px.val = 0;
+
+                            int u = (int) (f_u * (float) _lastRgbMsg.width);
+                            int v = (int) (f_v * (float) _lastRgbMsg.height);
+
+                            if (u < _lastRgbMsg.width && v < _lastRgbMsg.height) {
+                                int idxRgb = u * 3 + v * _lastRgbMsg.width * 3;
+                                px.color.b = rgbData[idxRgb + 0];
+                                px.color.g = rgbData[idxRgb + 1];
+                                px.color.r = rgbData[idxRgb + 2];
+                                px.color.a = 255; // not really used
+                            }
+
+                            //ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGBA
+                            ptCloudPtr[idx + 3] = *reinterpret_cast<float *>(&px.val); // RGB
                         }
-
-                        //ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGBA
-                        ptCloudPtr[idx + 3] = *reinterpret_cast<float*>(&px.val); // RGB
-                    }
-                    else
-                    {
-                        ptCloudPtr[idx + 0] = -2.0f; // Z
-                        ptCloudPtr[idx + 1] = -2.0f; // Y
-                        ptCloudPtr[idx + 2] = -2.0f; // X
-                        ptCloudPtr[idx + 3] = 0;
+                        else {
+                            ptCloudPtr[idx + 0] = -2.0f; // Z
+                            ptCloudPtr[idx + 1] = -2.0f; // Y
+                            ptCloudPtr[idx + 2] = -2.0f; // X
+                            ptCloudPtr[idx + 3] = 0;
+                        }
                     }
                 }
-            }
 
-            _vertex_reg_pub.publish( _lastRGBPtCloud );
+                _vertex_reg_pub.publish(_lastRGBPtCloud);
+            }
+        }
+        // <<<<< RGB Point Cloud (data in m)
+    }
+
+    if(_enable_depth_confidence)
+    {
+
+        sensor_msgs::ImagePtr depth_msg = boost::make_shared<sensor_msgs::Image>();
+        depth_msg->header.stamp = _lastPtCloudMsgHeader.stamp;
+        depth_msg->encoding = sensor_msgs::image_encodings::TYPE_16SC1;
+        depth_msg->width = info->width;
+        depth_msg->height = info->height;
+        depth_msg->step = depth_msg->width * sizeof(int16_t);
+        depth_msg->data.resize(depth_msg->height * depth_msg->step);
+        memcpy(&depth_msg->data[0],data.depthMap,info->width*info->height*sizeof(int16_t));
+
+        sensor_msgs::ImagePtr confidence_msg = boost::make_shared<sensor_msgs::Image>();
+        confidence_msg->header.stamp = _lastPtCloudMsgHeader.stamp;
+        confidence_msg->encoding = sensor_msgs::image_encodings::TYPE_16SC1;
+        confidence_msg->width = info->width;
+        confidence_msg->height = info->height;
+        confidence_msg->step = depth_msg->width * sizeof(int16_t);
+        confidence_msg->data.resize(depth_msg->height * depth_msg->step);
+        memcpy(&confidence_msg->data[0],data.confidenceMap,info->width*info->height*sizeof(int16_t));
+
+        // >>>>> Camera info
+        sensor_msgs::CameraInfo cam_info_msg;
+
+        cam_info_msg.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
+
+        cam_info_msg.D.resize(5);
+        cam_info_msg.D[0] = _depthIntrinsics.k1;
+        cam_info_msg.D[1] = _depthIntrinsics.k2;
+        cam_info_msg.D[2] = _depthIntrinsics.k3;
+        cam_info_msg.D[3] = _depthIntrinsics.p1;
+        cam_info_msg.D[4] = _depthIntrinsics.p2;
+        cam_info_msg.K.fill( 0.0 );
+        cam_info_msg.K[0] = _depthIntrinsics.fx;
+        cam_info_msg.K[2] = _depthIntrinsics.cx;
+        cam_info_msg.K[4] = _depthIntrinsics.fy;
+        cam_info_msg.K[5] = _depthIntrinsics.cy;
+        cam_info_msg.K[8] = 1.0;
+
+        cam_info_msg.R.fill( 0.0 );
+        cam_info_msg.P.fill( 0.0 );
+        cam_info_msg.P[0] = _depthIntrinsics.fx;
+        cam_info_msg.P[2] = _depthIntrinsics.cx;
+        cam_info_msg.P[5] = _depthIntrinsics.fy;
+        cam_info_msg.P[6] = _depthIntrinsics.cy;
+        cam_info_msg.P[10] = 1.0;
+
+        cam_info_msg.header.stamp = ros::Time::now();
+        cam_info_msg.header.seq = info->totalSampleCount;
+        cam_info_msg.header.frame_id = "depth_frame";
+
+        cam_info_msg.width = info->width;
+        cam_info_msg.height = info->height;
+        // <<<<< Camera info
+
+
+        if( _depth_pub.getNumSubscribers()>0 )
+        {
+            _depth_pub.publish(*depth_msg, cam_info_msg);
+        }
+
+        if( _confidence_pub.getNumSubscribers()>0 )
+        {
+            _confidence_pub.publish(*confidence_msg, cam_info_msg);
         }
     }
-    // <<<<< RGB Point Cloud (data in m)
 
-    if(_publish_tf)
+    if( _enable_ptcloud || _enable_depth_confidence)
     {
+        if (_publish_tf)
+        {
 
         //ROS_INFO_STREAM( "accX: " << accX << "g - accY: " << accY << "g - accZ: " << accZ << "g" );
         //ROS_INFO_STREAM( "Roll: " << roll*RAD2DEG << " deg - Pitch: " << pitch*RAD2DEG << " deg" );
 
-        static tf::TransformBroadcaster br;
-        tf::Transform transform;
-        transform.setOrigin( tf::Vector3(0.0, 0.0, 0.0) );
-        tf::Quaternion q;
+            static tf::TransformBroadcaster br;
+            tf::Transform transform;
+            transform.setOrigin(tf::Vector3(0.0, 0.0, 0.0));
+            tf::Quaternion q;
 
         if(_enable_accel)
         {
@@ -979,10 +1057,10 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
         else
             q.setRPY( 90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
 
-        transform.setRotation(q);
+            transform.setRotation(q);
         br.sendTransform( tf::StampedTransform(transform, now, "world", "depth_frame") );
+        }
     }
-
 }
 
 DepthSenseDriver::NodeInfo* DepthSenseDriver::findInfo(DepthSense::Node node)
