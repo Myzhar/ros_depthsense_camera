@@ -109,13 +109,17 @@ private:
     static bool _stopping;
 
     // >>>>> node params
-    bool _publish_tf; ///< Publish TF if true
-    bool _enable_rgb; ///< Publish RGB stream if true
+    bool _publish_tf;           ///< Publish TF if true
+    bool _enable_rgb;           ///< Publish RGB stream if true
+    bool _enable_auto_wb;       ///< Enable RGB automatic white balance
     bool _enable_depth_confidence; ///< Publish Depth and Confidence stream if true
-    bool _enable_ptcloud; ///< Publish 3d pointcloud if true.
-    bool _enable_registered; ///< Publish 3d registered pointcloud if true and @ref _enable_rgb is true and @ref _enable_ptcloud is true
-    bool _enable_accel; ///< Publish accelerometer data if true
-    bool _enable_auto_wb; ///< Enable RGB automatic white balance
+    int  _conf_thresh;          ///< Confidence threshold [DYN]
+    int  _power_line_freq;      ///< Frequency of the light powerline [0-disabled,50hz,60hz]
+    bool _enable_ptcloud;       ///< Publish 3d pointcloud if true.
+    bool _enable_denoise;       ///< Enable denoise filter [DYN]
+    bool _enable_registered;    ///< Publish 3d registered pointcloud if true and @ref _enable_rgb is true and @ref _enable_ptcloud is true
+    bool _enable_accel;         ///< Publish accelerometer data if true
+
     // <<<<< node params
 
     // >>>>> Camera parameters

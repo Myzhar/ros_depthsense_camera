@@ -184,6 +184,9 @@ void DepthSenseDriver::release()
 #define PAR_ENABLE_ACCEL            "ds_camera/enable_accel"
 #define PAR_ENABLE_AUTO_WB          "ds_camera/enable_auto_wb"
 #define PAR_ENABLE_DEPTH_CONFIDENCE "ds_camera/enable_depth_confidence"
+#define PAR_ENABLE_DENOISE          "ds_camera/enable_denoise"
+#define PAR_CONF_THRESH             "ds_camera/confidence_thresh"
+#define PAR_POW_LINE_FREQ           "ds_camera/power_line_freq"
 
 void DepthSenseDriver::loadParams()
 {
@@ -255,6 +258,36 @@ void DepthSenseDriver::loadParams()
     {
         _enable_depth_confidence = true;
         _nh.setParam( PAR_ENABLE_DEPTH_CONFIDENCE, _enable_depth_confidence );
+    }
+
+    if( _nh.hasParam( PAR_ENABLE_DENOISE ) )
+    {
+        _nh.getParam( PAR_ENABLE_DENOISE, _enable_denoise );
+    }
+    else
+    {
+        _enable_denoise = true;
+        _nh.setParam( PAR_ENABLE_DENOISE, _enable_denoise );
+    }
+
+    if( _nh.hasParam( PAR_CONF_THRESH ) )
+    {
+        _nh.getParam( PAR_CONF_THRESH, _conf_thresh );
+    }
+    else
+    {
+        _conf_thresh = 60;
+        _nh.setParam( PAR_CONF_THRESH, _conf_thresh );
+    }
+
+    if( _nh.hasParam( PAR_POW_LINE_FREQ ) )
+    {
+        _nh.getParam( PAR_POW_LINE_FREQ, _power_line_freq );
+    }
+    else
+    {
+        _power_line_freq = 50;
+        _nh.setParam( PAR_POW_LINE_FREQ, _power_line_freq );
     }
 }
 
@@ -364,12 +397,12 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
 
     DepthSense::DepthNode::Configuration configuration = depthNode.getConfiguration();
 
-    ROS_DEBUG_STREAM(" Available configurations:");
+    ROS_INFO_STREAM(" Available configurations:");
     std::vector<DepthSense::DepthNode::Configuration> configurations = depthNode.getConfigurations();
 
     for(unsigned int i = 0; i < configurations.size(); i++)
     {
-        ROS_DEBUG("    %s - %d fps - %s - saturation %s",
+        ROS_INFO("    %s - %d fps - %s - saturation %s",
                   DepthSense::FrameFormat_toString(configurations[i].frameFormat).c_str(),
                   configurations[i].framerate,
                   DepthSense::DepthNode::CameraMode_toString(configurations[i].mode).c_str(),
@@ -382,9 +415,9 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
     depthNode.setEnableDepthMap( _enable_depth_confidence ); // TODO handle data
     depthNode.setEnableDepthMapFloatingPoint( false ); // TODO handle data
     depthNode.setEnablePhaseMap( false ); // TODO handle data
-    depthNode.setEnableUvMap( true ); // TODO handle data
+    depthNode.setEnableUvMap( _enable_rgb && _enable_registered ); // TODO handle data
     depthNode.setEnableVertices( false ); // TODO handle data
-    depthNode.setEnableVerticesFloatingPoint( true ); // TODO handle data
+    depthNode.setEnableVerticesFloatingPoint( _enable_ptcloud ); // TODO handle data
     // <<<<< Node data enabling
 
     bool doSetConfiguration = true;
@@ -408,8 +441,8 @@ bool DepthSenseDriver::addDepthNode(DepthSense::Device device, DepthSense::Node 
         }
 
         // >>>>> Parameters
-        depthNode.setConfidenceThreshold(60); // TODO create param
-        depthNode.setEnableDenoising( true ); // TODO create param
+        depthNode.setConfidenceThreshold( _conf_thresh );
+        depthNode.setEnableDenoising( _enable_denoise );
         configuration.framerate = 60; // TODO create param
         // <<<<< Parameters
 
@@ -478,6 +511,24 @@ bool DepthSenseDriver::addColorNode(DepthSense::Device device, DepthSense::Node 
 
     configuration.frameFormat=DepthSense::FRAME_FORMAT_VGA;
     configuration.compression=DepthSense::COMPRESSION_TYPE_MJPEG;
+
+    switch( _power_line_freq )
+    {
+    case 50:
+        configuration.powerLineFrequency = DepthSense::POWER_LINE_FREQUENCY_50HZ;
+        break;
+
+    case 60:
+        configuration.powerLineFrequency = DepthSense::POWER_LINE_FREQUENCY_60HZ;
+        break;
+
+    case 0:
+    default:
+        configuration.powerLineFrequency = DepthSense::POWER_LINE_FREQUENCY_DISABLED;
+        break;
+    }
+
+    //configuration.framerate = 30;
 
     bool doSetConfiguration = true;
 
@@ -683,7 +734,7 @@ void DepthSenseDriver::onNewColorNodeSampleReceived( DepthSense::ColorNode node,
         _lastRgbMsg.height = info->height;
         _lastRgbMsg.encoding = sensor_msgs::image_encodings::BGR8;
 
-        _lastRgbMsg.step = info->width * 3;
+        _lastRgbMsg.step = info->width * sizeof(uint8_t) * 3;
 
         int imgSize = _lastRgbMsg.height * _lastRgbMsg.step;
         _lastRgbMsg.data.resize( imgSize );
@@ -827,7 +878,6 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
     // <<<<< Accelerometer data
 
     // >>>>> float Point Clouds (data in m)
-
     if( _enable_ptcloud )
     {
         const DepthSense::FPVertex *fp_vertex = (const DepthSense::FPVertex *) data.verticesFloatingPoint;
@@ -969,24 +1019,27 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
 
     if(_enable_depth_confidence)
     {
-
         sensor_msgs::ImagePtr depth_msg = boost::make_shared<sensor_msgs::Image>();
         depth_msg->header.stamp = _lastPtCloudMsgHeader.stamp;
-        depth_msg->encoding = sensor_msgs::image_encodings::TYPE_16SC1;
+        depth_msg->encoding = sensor_msgs::image_encodings::MONO16;
         depth_msg->width = info->width;
         depth_msg->height = info->height;
         depth_msg->step = depth_msg->width * sizeof(int16_t);
-        depth_msg->data.resize(depth_msg->height * depth_msg->step);
-        memcpy(&depth_msg->data[0],data.depthMap,info->width*info->height*sizeof(int16_t));
+
+        int imgSize = depth_msg->height * depth_msg->step;
+        depth_msg->data.resize( imgSize );
+        memcpy( &depth_msg->data[0], data.depthMap, imgSize );
 
         sensor_msgs::ImagePtr confidence_msg = boost::make_shared<sensor_msgs::Image>();
         confidence_msg->header.stamp = _lastPtCloudMsgHeader.stamp;
-        confidence_msg->encoding = sensor_msgs::image_encodings::TYPE_16SC1;
+        confidence_msg->encoding = sensor_msgs::image_encodings::MONO16;
         confidence_msg->width = info->width;
         confidence_msg->height = info->height;
         confidence_msg->step = depth_msg->width * sizeof(int16_t);
-        confidence_msg->data.resize(depth_msg->height * depth_msg->step);
-        memcpy(&confidence_msg->data[0],data.confidenceMap,info->width*info->height*sizeof(int16_t));
+
+        imgSize = confidence_msg->height * confidence_msg->step;
+        confidence_msg->data.resize(imgSize);
+        memcpy( &confidence_msg->data[0], data.confidenceMap, imgSize );
 
         // >>>>> Camera info
         sensor_msgs::CameraInfo cam_info_msg;
@@ -1039,25 +1092,25 @@ void DepthSenseDriver::onNewDepthNodeSampleReceived( DepthSense::DepthNode node,
         if (_publish_tf)
         {
 
-        //ROS_INFO_STREAM( "accX: " << accX << "g - accY: " << accY << "g - accZ: " << accZ << "g" );
-        //ROS_INFO_STREAM( "Roll: " << roll*RAD2DEG << " deg - Pitch: " << pitch*RAD2DEG << " deg" );
+            //ROS_INFO_STREAM( "accX: " << accX << "g - accY: " << accY << "g - accZ: " << accZ << "g" );
+            //ROS_INFO_STREAM( "Roll: " << roll*RAD2DEG << " deg - Pitch: " << pitch*RAD2DEG << " deg" );
 
             static tf::TransformBroadcaster br;
             tf::Transform transform;
             transform.setOrigin(tf::Vector3(0.0, 0.0, 0.0));
             tf::Quaternion q;
 
-        if(_enable_accel)
-        {
-            double roll = _lastImuMsg.orientation.x;
-            double pitch = _lastImuMsg.orientation.y;
-            q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
-        }
-        else
-            q.setRPY( 90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
+            if(_enable_accel)
+            {
+                double roll = _lastImuMsg.orientation.x;
+                double pitch = _lastImuMsg.orientation.y;
+                q.setRPY( 90.0*DEG2RAD-roll, 0.0*DEG2RAD-pitch, 0.0*DEG2RAD);
+            }
+            else
+                q.setRPY( 90.0*DEG2RAD, 0.0*DEG2RAD, 0.0*DEG2RAD);
 
             transform.setRotation(q);
-        br.sendTransform( tf::StampedTransform(transform, now, "world", "depth_frame") );
+            br.sendTransform( tf::StampedTransform(transform, now, "world", "depth_frame") );
         }
     }
 }
