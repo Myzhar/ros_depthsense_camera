@@ -81,10 +81,13 @@ catkin_package(
 
 ###############################################################################
 # INCLUDES
+set(depthsense_INC_PATH
+    src/driver/include/
+)
 
 set(depthsense_INC_DIRS
     src/
-    src/driver/include/
+    ${depthsense_INC_PATH}
     /opt/softkinetic/DepthSenseSDK/include
 )
 
@@ -120,12 +123,18 @@ set(depthsense_SRC
     src/depthsense_camera_node.cpp
     src/driver/src/depthsense_camera_driver.cpp
 )
+
+set(depthsense_HDR
+    ${depthsense_INC_PATH}/depthsense_camera_driver.h
+)
+
 ###############################################################################
 
 ###############################################################################
 # EXECUTABLE
 add_executable(
   depthsense_camera_node
+  ${depthsense_HDR}
   ${depthsense_SRC}
 )
 
